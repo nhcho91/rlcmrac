@@ -1,3 +1,12 @@
+# Custom
+*.jpg
+*.png
+*.mp4
+*.mov
+*.eps
+
+
+
 # Created by https://www.gitignore.io/api/vim,latex,linux,macos,python
 # Edit at https://www.gitignore.io/?templates=vim,latex,linux,macos,python
 
@@ -23,7 +32,7 @@
 # these rules might exclude image files for figures etc.
 # *.ps
 # *.eps
-# *.pdf
+*.pdf
 
 ## Generated if empty string is given at "Please type another file name for output:"
 .pdf
@@ -35,6 +44,7 @@
 *-blx.aux
 *-blx.bib
 *.run.xml
+*.bst
 
 ## Build tool auxiliary files:
 *.fdb_latexmk
