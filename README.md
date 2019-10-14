@@ -5,7 +5,7 @@
 `environment.yml` 파일을 이용해서 `conda` 가상환경을 만든다.
 
 ```bash
-$ conda env create -f environment.yml -p ./.envs
+$ conda env create -f environment.yml
 ```
 
 가상환경은 프로젝트 루트 디렉터리에 `.envs` 라는 이름으로 만들어진다.
