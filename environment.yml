@@ -1,0 +1,16 @@
+name: ifac-wc-2020
+channels:
+  - pytorch
+  - gpytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.7
+  - matplotlib
+  - ipython
+  - pytorch
+  - torchvision
+  - gpytorch
+  - pip
+  - pip:
+    - "--editable=git+https://github.com/fdcl-nrf/fym.git@master#egg=fym"
