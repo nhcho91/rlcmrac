@@ -1,0 +1,49 @@
+{
+	"experiment": {
+		"name": "test",
+		"obs_log_name": "obs_history.h5"
+	},
+	"environment": {
+		"time_step": 0.01,
+		"final_time": 60,
+		"ode_step_len": 3,
+		"seed": 1
+	},
+	"main_system": {
+		"initial_state": [0.3, 0, 0],
+		"A": [[0, 1, 0], [-15.8, -5.6, -17.3], [1, 0, 0]],
+		"B": [[0], [1], [0]],
+		"real_param": [
+			[-18.59521], [15.162375], [-62.45153], [9.54708], [21.45291]
+		]
+	},
+	"reference_system": {
+		"initial_state": [0.3, 0, 0],
+		"Ar": [[0, 1, 0], [-15.8, -5.6, -17.3], [1, 0, 0]],
+		"Br": [[0], [0], [-1]]
+	},
+	"adaptive_system": {
+		"initial_state": [[0], [0], [0], [0], [0]],
+		"gamma1": 1000,
+		"gamma2": 10,
+		"Q": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+	},
+	"filter_system": {
+		"initial_state": [0],
+		"tau": 0.001
+	},
+	"filtered_phi": {
+		"initial_state": [0, 0, 0, 0, 0]
+	},
+	"agent": {
+		"mem_max_size": 100,
+		"eps": 1e-10,
+		"batch_size": 128,
+		"hidden_size": 32,
+		"buffer_size": 1e4,
+		"value_lr": 1e-4,
+		"soft_q_lr": 1e-4,
+		"policy_lr": 1e-4,
+		"model_log_dir": "log/model"
+	}
+}

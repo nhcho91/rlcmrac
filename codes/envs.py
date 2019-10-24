@@ -8,12 +8,228 @@ import numpy.linalg as nla
 import scipy.linalg as sla
 import scipy.signal
 
-from gym import spaces
+from gym import spaces, Wrapper
 
 from fym.core import BaseEnv, BaseSystem, infinite_box
 import fym.utils.logger as logger
 
 from utils import assign_2d
+
+
+class MRACEnv(BaseEnv):
+    def __init__(self, spec):
+        A = Ar = spec['reference_system']['Ar']
+        B = spec['main_system']['B']
+        Br = spec['reference_system']['Br']
+        self.eps = spec['agent']['eps']
+
+        self.obs_logger = logger.Logger(
+            file_name=spec['environment']['obs_log_name']
+        )
+
+        self.unc = ParamUnc(real_param=spec['main_system']['real_param'])
+        self.cmd = SquareCmd(period=20, phase=10)
+
+        main_system = MainSystem(
+            name='main_system',
+            initial_state=spec['main_system']['initial_state'],
+            A=A,
+            B=B,
+            Br=Br,
+            unc=self.unc,
+            cmd=self.cmd
+        )
+        reference_system = RefSystem(
+            name='reference_system',
+            initial_state=spec['reference_system']['initial_state'],
+            Ar=Ar,
+            Br=Br,
+            cmd=self.cmd
+        )
+        adaptive_system = AdaptiveSystem(
+            name='adaptive_system',
+            initial_state=spec['adaptive_system']['initial_state'],
+            A=A,
+            B=B,
+            gamma1=spec['adaptive_system']['gamma1'],
+            gamma2=spec['adaptive_system']['gamma2'],
+            Q=spec['adaptive_system']['Q'],
+            unc=self.unc
+        )
+
+        M_shape = adaptive_system.state_shape[:1] * 2
+        N_shape = adaptive_system.state_shape
+
+        self.phi_size = N_shape[0]
+        self.y_size = N_shape[1]
+
+        self.observation_space = spaces.Dict({
+            "whole_state": infinite_box(
+                np.sum((
+                    np.shape(spec['main_system']['initial_state']),
+                    np.shape(spec['reference_system']['initial_state']),
+                    np.shape(np.ravel(spec['adaptive_system']['initial_state'])),
+                    np.shape(Br)[1:]
+                ))),
+            "y": infinite_box(N_shape[1]),
+            "phif": infinite_box(N_shape[0])
+        })
+        self.action_space = spaces.Dict({
+            "M": infinite_box(M_shape),
+            "N": infinite_box(N_shape)
+        })
+
+        super().__init__(
+            systems=[
+                main_system,
+                reference_system,
+                adaptive_system,
+            ],
+            dt=spec['environment']['time_step'],
+            max_t=spec['environment']['final_time'],
+            ode_step_len=spec['environment']['ode_step_len'],
+        )
+
+    def reset(self):
+        """
+        Resets to the initial states of the systems.
+        """
+        states = super().reset()
+        t = self.clock.get()
+        return self.observation(t, states)
+
+    def observation(self, t, states):
+        """
+        This function converts all the states to a flat array.
+        """
+        x, xr, W, _, _ = states.values()
+        obs = np.hstack((
+            x,
+            xr,
+            W.ravel(),
+            self.cmd.get(t),
+        ))
+        return obs
+
+    def step(self, action):
+        states = self.states
+        t = self.clock.get()
+
+        next_states, full_hist = self.get_next_states(t, states, action)
+
+        # Reward
+        reward = self.compute_reward()
+
+        # Terminal condition
+        done = self.is_terminal()
+
+        # info
+        info = {
+            'time': t,
+            'obs': states,
+            'reward': reward,
+            'done': done,
+        }
+
+        # Updates
+        self.states = next_states
+        self.clock.tick()
+
+        t = self.clock.get()
+        obs = self.observation(t, next_states)
+
+        return obs, reward, done, info
+
+    def derivs(self, t, states, action):
+        """
+        The argument ``action`` here is the composite term of the CMRAC which
+        has a matrix form.
+        """
+        x, xr, W = states.values()
+
+        e = x - xr
+        u = -W.T.dot(self.unc.basis(x))
+
+        xdot = OrderedDict.fromkeys(self.systems)
+        xdot.update({
+            'main_system': self.systems['main_system'].deriv(t, x, u),
+            'reference_system': self.systems['reference_system'].deriv(t, x),
+            'adaptive_system': self.systems['adaptive_system'].deriv(
+                W, x, e, action),
+        })
+        return self.unpack_state(xdot)
+
+    def is_terminal(self):
+        if self.clock.get() > self.clock.max_t:
+            return True
+        else:
+            return False
+
+    def compute_reward(self):
+        return None
+
+    def parse_data(self, f):
+        data = logger.recursively_load_dict_contents_from_group(f, '/')
+        xs = data['state']['main_system']
+        Ws = data['state']['adaptive_system']
+        u_mrac = np.vstack(
+            [-W.T.dot(self.unc.basis(x)) for W, x in zip(Ws, xs)])
+        new_data = {
+            'control': {
+                'MRAC': u_mrac
+            }
+        }
+        new_data['control']['MRAC'] = u_mrac
+        return new_data
+
+    def close(self):
+        new_data = self.parse_data(self.logger.f)
+        logger.save_dict_to_hdf5(self.logger.f, new_data)
+        self.logger.close()
+
+
+class FilterWrapper(Wrapper):
+    """
+    This wrapper appends two filtering systems to the given env.
+    """
+    def __init__(self, env):
+        super().__init__(env)
+
+        spec = env.spec
+        filter_system = FilterSystem(
+            name='filter_system',
+            initial_state=spec['filter_system']['initial_state'],
+            A=spec['reference_system']['Ar'],
+            B=spec['main_system']['B'],
+            tau=spec['filter_system']['tau']
+        )
+        filtered_phi = FilteredPhi(
+            name='filtered_phi',
+            initial_state=spec['filtered_phi']['initial_state'],
+            tau=spec['filter_system']['tau'],
+            unc=env.unc
+        )
+        env.append_systems([filter_system, filtered_phi])
+
+        self.observation_space = None
+        self.action_space = None
+
+    def reset(self):
+        pass
+
+    def step(self, action):
+        pass
+
+
+class MemoryWrapper(Wrapper):
+    def __init__(self, env):
+        pass
+
+    def reset(self):
+        pass
+
+    def step(self, action):
+        return self.env.step(action)
 
 
 class CompositeMRACEnv(BaseEnv):
@@ -23,6 +239,10 @@ class CompositeMRACEnv(BaseEnv):
         Br = spec['reference_system']['Br']
         self.mem_max_size = spec['agent']['mem_max_size']
         self.eps = spec['agent']['eps']
+
+        self.obs_logger = logger.Logger(
+            file_name=spec['environment']['obs_log_name']
+        )
 
         self.unc = ParamUnc(real_param=spec['main_system']['real_param'])
         self.cmd = SquareCmd(period=20, phase=10)
@@ -167,7 +387,12 @@ class CompositeMRACEnv(BaseEnv):
 
         # info
         info = {
-            'full_hist': full_hist
+            'time': t,
+            'obs': states,
+            'reward': reward,
+            'done': done,
+            'phi_mem': phi_mem,
+            'y_mem': y_mem
         }
 
         # Updates
@@ -228,7 +453,11 @@ class CompositeMRACEnv(BaseEnv):
         Ws = data['state']['adaptive_system']
         u_mrac = np.vstack(
             [-W.T.dot(self.unc.basis(x)) for W, x in zip(Ws, xs)])
-        new_data = {}
+        new_data = {
+            'control': {
+                'MRAC': u_mrac
+            }
+        }
         new_data['control']['MRAC'] = u_mrac
         return new_data
 

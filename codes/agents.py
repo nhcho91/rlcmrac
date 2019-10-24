@@ -1,3 +1,6 @@
+"""
+https://github.com/higgsfield/RL-Adventure-2/blob/master/7.soft%20actor-critic.ipynb
+"""
 from collections import deque
 import random
 

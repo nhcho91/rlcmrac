@@ -1,11 +1,17 @@
+"""
+Run entire experiments and save thd data
+```
+python main.py
+```
+"""
 import numpy as np
 import sys
-from tqdm import tqdm
+import ujson
 
 import torch
 
-from envs.composite_mrac import CompositeMRACEnv
-from agents import Agent
+from envs import CompositeMRACEnv, MRACEnv
+from agents import Void, Agent
 
 
 class Session:
@@ -15,10 +21,6 @@ class Session:
         # Define agent and env
         self.env = CompositeMRACEnv(spec)
         self.agent = Agent(spec)
-
-    def try_ckpt(self, agent, env):
-        """Check then run checkpoint log/eval"""
-        pass
 
     def run(self):
         """Run the main RL loop until clock.max_frame"""
@@ -76,61 +78,50 @@ class Trial:
         return None
 
 
-class Trainer():
-    pass
-
-
-def main():
-    spec = {
-        'experiment': {
-            'name': 'test'
-        },
-        'environment': {
-            'time_step': 0.01,
-            'final_time': 60,
-            'ode_step_len': 3
-        },
-        'main_system': {
-            'initial_state': [0.3, 0, 0],
-            'A': [[0, 1, 0], [-15.8, -5.6, -17.3], [1, 0, 0]],
-            'B': [[0], [1], [0]],
-            'real_param': [
-                [-18.59521], [15.162375], [-62.45153], [9.54708], [21.45291]
-            ]
-        },
-        'reference_system': {
-            'initial_state': [0.3, 0, 0],
-            'Ar': [[0, 1, 0], [-15.8, -5.6, -17.3], [1, 0, 0]],
-            'Br': [[0], [0], [-1]],
-        },
-        'adaptive_system': {
-            'initial_state': [[0], [0], [0], [0], [0]],
-            'gamma1': 1000,
-            'gamma2': 0,
-            'Q': [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-        },
-        'filter_system': {
-            'initial_state': [0],
-            'tau': 0.001
-        },
-        'filtered_phi': {
-            'initial_state': [0, 0, 0, 0, 0],
-        },
-        'agent': {
-            'mem_max_size': 100,
-            'eps': 1e-10,
-            'batch_size': 128,
-            'hidden_size': 32,
-            'buffer_size': 1e4,
-            'value_lr': 1e-4,
-            'soft_q_lr': 1e-4,
-            'policy_lr': 1e-4,
-            'model_log_dir': 'log/model',
-        }
-    }
+def run_mrac():
+    with open('spec.json', 'r') as f:
+        spec = ujson.load(f)
 
     Trial(spec).run()
 
+    env = MRACEnv(spec)
+    agent = Agent(env, spec)
+
+    state = env.reset()
+
+    while True:
+        with torch.no_grad():
+            action = agent.act(state)
+
+        next_state, reward, done, info = env.step(action)
+
+        # The agent updates their internal state using
+        # all the information we've observed.
+        agent.update(state, action, reward, next_state, done)
+
+        state = next_state
+
+        if done:
+            break
+
+    env.close()
+
+
+def main(args):
+    if args.env == 'mrac':
+        env = MRACEnv(spec)
+
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-a', '--all', action='store_true')
+    group.add_argument('-e', '--env', choices=('mrac', 'clmrac', 'rlmrac'))
+    parser.add_argument(
+        '-p', '--plot',
+        help='If the argument is empty, it will plot the most recent data in'
+    )
+    args = parser.parse_args()
+
+    main(args)
