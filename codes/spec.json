@@ -1,8 +1,4 @@
 {
-	"experiment": {
-		"name": "test",
-		"obs_log_name": "obs_history.h5"
-	},
 	"environment": {
 		"time_step": 0.01,
 		"final_time": 60,
@@ -28,6 +24,10 @@
 		"gamma2": 10,
 		"Q": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 	},
+	"command": {
+		"period": 20,
+		"phase": 10
+	},
 	"filter_system": {
 		"initial_state": [0],
 		"tau": 0.001
@@ -35,9 +35,11 @@
 	"filtered_phi": {
 		"initial_state": [0, 0, 0, 0, 0]
 	},
+	"memory": {
+		"max_size": 100,
+		"norm_eps": 1e-10
+	},
 	"agent": {
-		"mem_max_size": 100,
-		"eps": 1e-10,
 		"batch_size": 128,
 		"hidden_size": 32,
 		"buffer_size": 1e4,

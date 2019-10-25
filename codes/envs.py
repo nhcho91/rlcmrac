@@ -11,80 +11,56 @@ import scipy.signal
 from gym import spaces, Wrapper
 
 from fym.core import BaseEnv, BaseSystem, infinite_box
-import fym.utils.logger as logger
+import fym.logging as logging
 
 from utils import assign_2d
 
 
-class MRACEnv(BaseEnv):
-    def __init__(self, spec):
+class MracEnv(BaseEnv):
+    def __init__(self, spec, log_dir):
         A = Ar = spec['reference_system']['Ar']
         B = spec['main_system']['B']
         Br = spec['reference_system']['Br']
-        self.eps = spec['agent']['eps']
-
-        self.obs_logger = logger.Logger(
-            file_name=spec['environment']['obs_log_name']
-        )
-
+        self.eps = spec['memory']['norm_eps']
         self.unc = ParamUnc(real_param=spec['main_system']['real_param'])
-        self.cmd = SquareCmd(period=20, phase=10)
+        self.cmd = SquareCmd(period=spec['period'], phase=spec["phase"])
+        self.log_dir = log_dir
 
-        main_system = MainSystem(
-            name='main_system',
-            initial_state=spec['main_system']['initial_state'],
-            A=A,
-            B=B,
-            Br=Br,
-            unc=self.unc,
-            cmd=self.cmd
-        )
-        reference_system = RefSystem(
-            name='reference_system',
-            initial_state=spec['reference_system']['initial_state'],
-            Ar=Ar,
-            Br=Br,
-            cmd=self.cmd
-        )
-        adaptive_system = AdaptiveSystem(
-            name='adaptive_system',
-            initial_state=spec['adaptive_system']['initial_state'],
-            A=A,
-            B=B,
-            gamma1=spec['adaptive_system']['gamma1'],
-            gamma2=spec['adaptive_system']['gamma2'],
-            Q=spec['adaptive_system']['Q'],
-            unc=self.unc
-        )
+        systems = {
+            'main_system': MainSystem(
+                initial_state=spec['main_system']['initial_state'],
+                A=A,
+                B=B,
+                Br=Br,
+                unc=self.unc,
+                cmd=self.cmd,
+            ),
+            'reference_system': RefSystem(
+                initial_state=spec['reference_system']['initial_state'],
+                Ar=Ar,
+                Br=Br,
+                cmd=self.cmd
+            ),
+            'adaptive_system': AdaptiveSystem(
+                initial_state=spec['adaptive_system']['initial_state'],
+                A=A,
+                B=B,
+                gamma1=spec['adaptive_system']['gamma1'],
+                Q=spec['adaptive_system']['Q'],
+                unc=self.unc
+            )
+        }
 
-        M_shape = adaptive_system.state_shape[:1] * 2
-        N_shape = adaptive_system.state_shape
-
-        self.phi_size = N_shape[0]
-        self.y_size = N_shape[1]
-
-        self.observation_space = spaces.Dict({
-            "whole_state": infinite_box(
-                np.sum((
-                    np.shape(spec['main_system']['initial_state']),
-                    np.shape(spec['reference_system']['initial_state']),
-                    np.shape(np.ravel(spec['adaptive_system']['initial_state'])),
-                    np.shape(Br)[1:]
-                ))),
-            "y": infinite_box(N_shape[1]),
-            "phif": infinite_box(N_shape[0])
-        })
-        self.action_space = spaces.Dict({
-            "M": infinite_box(M_shape),
-            "N": infinite_box(N_shape)
-        })
+        self.observation_space = infinite_box((
+            len(spec['main_system']['initial_state'])
+            + len(spec['reference_system']['initial_state']),
+            + len(np.ravel(spec['adaptive_system']['initial_state'])),
+            + np.shape(Br)[1],
+        ))
+        self.action_space = infinite_box([])
 
         super().__init__(
-            systems=[
-                main_system,
-                reference_system,
-                adaptive_system,
-            ],
+            systems=systems,
             dt=spec['environment']['time_step'],
             max_t=spec['environment']['final_time'],
             ode_step_len=spec['environment']['ode_step_len'],
@@ -102,7 +78,7 @@ class MRACEnv(BaseEnv):
         """
         This function converts all the states to a flat array.
         """
-        x, xr, W, _, _ = states.values()
+        x, xr, W, = states.values()
         obs = np.hstack((
             x,
             xr,
@@ -123,22 +99,13 @@ class MRACEnv(BaseEnv):
         # Terminal condition
         done = self.is_terminal()
 
-        # info
-        info = {
-            'time': t,
-            'obs': states,
-            'reward': reward,
-            'done': done,
-        }
-
         # Updates
         self.states = next_states
         self.clock.tick()
 
         t = self.clock.get()
         obs = self.observation(t, next_states)
-
-        return obs, reward, done, info
+        return obs, reward, done, {}
 
     def derivs(self, t, states, action):
         """
@@ -150,13 +117,12 @@ class MRACEnv(BaseEnv):
         e = x - xr
         u = -W.T.dot(self.unc.basis(x))
 
-        xdot = OrderedDict.fromkeys(self.systems)
-        xdot.update({
+        xdot = {
             'main_system': self.systems['main_system'].deriv(t, x, u),
             'reference_system': self.systems['reference_system'].deriv(t, x),
             'adaptive_system': self.systems['adaptive_system'].deriv(
-                W, x, e, action),
-        })
+                W, x, e),
+        }
         return self.unpack_state(xdot)
 
     def is_terminal(self):
@@ -168,79 +134,77 @@ class MRACEnv(BaseEnv):
     def compute_reward(self):
         return None
 
-    def parse_data(self, f):
-        data = logger.recursively_load_dict_contents_from_group(f, '/')
+    def parse_data(self, path):
+        data = logging.load(path)
         xs = data['state']['main_system']
         Ws = data['state']['adaptive_system']
         u_mrac = np.vstack(
             [-W.T.dot(self.unc.basis(x)) for W, x in zip(Ws, xs)])
-        new_data = {
+
+        data.update({
             'control': {
-                'MRAC': u_mrac
+                'MRAC': u_mrac,
             }
-        }
-        new_data['control']['MRAC'] = u_mrac
-        return new_data
+        })
+        return data
 
     def close(self):
-        new_data = self.parse_data(self.logger.f)
-        logger.save_dict_to_hdf5(self.logger.f, new_data)
-        self.logger.close()
+        data = self.parse_data(self.logger.path)
+        logging.save(self.log_dir, data)
+        super().close()
 
 
-class FilterWrapper(Wrapper):
-    """
-    This wrapper appends two filtering systems to the given env.
-    """
-    def __init__(self, env):
-        super().__init__(env)
+class CmracEnv(MracEnv):
+    def __init__(self, spec):
+        super.__init__(spec)
+        new_systems = {
+            'filter_system': FilterSystem(
+                initial_state=spec['filter_system']['initial_state'],
+                A=spec['reference_system']['Ar'],
+                B=spec['main_system']['B'],
+                tau=spec['filter_system']['tau']
+            ),
+            'filtered_phi': FilteredPhi(
+                name='filtered_phi',
+                initial_state=spec['filtered_phi']['initial_state'],
+                tau=spec['filter_system']['tau'],
+                unc=self.unc
+            ),
+        }
+        self.append_systems(new_systems)
 
-        spec = env.spec
-        filter_system = FilterSystem(
-            name='filter_system',
-            initial_state=spec['filter_system']['initial_state'],
-            A=spec['reference_system']['Ar'],
-            B=spec['main_system']['B'],
-            tau=spec['filter_system']['tau']
-        )
-        filtered_phi = FilteredPhi(
-            name='filtered_phi',
-            initial_state=spec['filtered_phi']['initial_state'],
-            tau=spec['filter_system']['tau'],
-            unc=env.unc
-        )
-        env.append_systems([filter_system, filtered_phi])
-
-        self.observation_space = None
-        self.action_space = None
+        # Memory
+        self.memory = Memory()
 
     def reset(self):
-        pass
+        states = super().reset()
+        t = self.clock.get()
 
     def step(self, action):
+        states = self.states
+        t = self.clock.get()
+
+        wrapped_action = self.wrap_action(action, memory)
+
+
+class Memory:
+    def __init__(self):
+        self.phi 
+        self.y
+
+    def step(self):
         pass
 
 
-class MemoryWrapper(Wrapper):
-    def __init__(self, env):
-        pass
-
-    def reset(self):
-        pass
-
-    def step(self, action):
-        return self.env.step(action)
-
-
-class CompositeMRACEnv(BaseEnv):
+class CmracEnv(BaseEnv):
     def __init__(self, spec):
         A = Ar = spec['reference_system']['Ar']
         B = spec['main_system']['B']
         Br = spec['reference_system']['Br']
         self.mem_max_size = spec['agent']['mem_max_size']
-        self.eps = spec['agent']['eps']
+        self.eps = spec['memory']['norm_eps']
 
-        self.obs_logger = logger.Logger(
+        self.obs_logger = logging.Logger(
             file_name=spec['environment']['obs_log_name']
         )
 
@@ -448,7 +412,7 @@ class CompositeMRACEnv(BaseEnv):
         return reward
 
     def parse_data(self, f):
-        data = logger.recursively_load_dict_contents_from_group(f, '/')
+        data = logging.load(self.path)
         xs = data['state']['main_system']
         Ws = data['state']['adaptive_system']
         u_mrac = np.vstack(
@@ -463,7 +427,7 @@ class CompositeMRACEnv(BaseEnv):
 
     def close(self):
         new_data = self.parse_data(self.logger.f)
-        logger.save_dict_to_hdf5(self.logger.f, new_data)
+        logging.save(self.logger.f, new_data)
         self.logger.close()
 
 
@@ -511,8 +475,8 @@ class SquareCmd:
 
 
 class MainSystem(BaseSystem):
-    def __init__(self, name, initial_state, A, B, Br, unc, cmd):
-        super().__init__(name=name, initial_state=initial_state)
+    def __init__(self, initial_state, A, B, Br, unc, cmd):
+        super().__init__(initial_state=initial_state)
         self.A, self.B, self.Br = map(assign_2d, [A, B, Br])
         self.unc = unc
         self.cmd = cmd
@@ -527,8 +491,8 @@ class MainSystem(BaseSystem):
 
 
 class RefSystem(BaseSystem):
-    def __init__(self, name, initial_state, Ar, Br, cmd):
-        super().__init__(name, initial_state)
+    def __init__(self, initial_state, Ar, Br, cmd):
+        super().__init__(initial_state)
 
         self.Ar = assign_2d(Ar)
         self.Br = assign_2d(Br)
@@ -540,13 +504,12 @@ class RefSystem(BaseSystem):
 
 
 class AdaptiveSystem(BaseSystem):
-    def __init__(self, name, initial_state, A, B, gamma1, gamma2, Q, unc):
-        super().__init__(name=name, initial_state=initial_state)
+    def __init__(self, initial_state, A, B, gamma1, Q, unc):
+        super().__init__(initial_state=initial_state)
 
         self.A = assign_2d(A)
         self.B = assign_2d(B)
         self.gamma1 = gamma1
-        self.gamma2 = gamma2
         self.Q = assign_2d(Q)
         self.P = self.calc_P(self.A, self.B, self.Q)
         self.basis = unc.basis
@@ -555,20 +518,19 @@ class AdaptiveSystem(BaseSystem):
         P = sla.solve_lyapunov(self.A.T, -self.Q)
         return P
 
-    def deriv(self, W, x, e, composite_input):
-        M, N = composite_input['M'], composite_input['N']
+    def deriv(self, W, x, e):
+        # M, N = composite_input['M'], composite_input['N']
         Wdot = (
             np.dot(
                 self.gamma1, np.outer(self.basis(x), e)
             ).dot(self.P).dot(self.B)
-            - np.dot(self.gamma2, M.dot(W) - N)
         )
         return Wdot
 
 
 class FilterSystem(BaseSystem):
-    def __init__(self, name, initial_state, A, B, tau):
-        super().__init__(name=name, initial_state=initial_state)
+    def __init__(self, initial_state, A, B, tau):
+        super().__init__(initial_state=initial_state)
         self.A = A
         self.Bh = sla.pinv(B)
         self.tau = tau
@@ -587,8 +549,8 @@ class FilterSystem(BaseSystem):
 
 
 class FilteredPhi(BaseSystem):
-    def __init__(self, name, initial_state, tau, unc):
-        super().__init__(name=name, initial_state=initial_state)
+    def __init__(self, initial_state, tau, unc):
+        super().__init__(initial_state=initial_state)
         self.tau = tau
         self.basis = unc.basis
 

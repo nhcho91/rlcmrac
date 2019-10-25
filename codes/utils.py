@@ -1,6 +1,7 @@
 import numpy as np
 from collections import deque
 import pydash as ps
+import ujson
 
 
 class Differentiator:
@@ -37,3 +38,9 @@ def set_attr(obj, attr_dict, keys=None, to_numpy=True):
             val = np.asarray(val)
         setattr(obj, attr, val)
     return obj
+
+
+def load_spec(file):
+    with open(file, 'r') as f:
+        data = ujson.load(f)
+    return data

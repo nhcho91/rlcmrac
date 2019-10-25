@@ -111,8 +111,16 @@ class PolicyNetwork(nn.Module):
         return action
 
 
+class NullAgent:
+    def __init__(self, env):
+        self.action_shape = env.action_space.shape
+
+    def act(self, obs):
+        return np.zeros(self.action_shape)
+
+
 class Agent:
-    def __init__(self, spec):
+    def __init__(self, env, spec):
         self.phi_mem = []
         self.y_mem = []
         self.eps = spec['agent']['eps']
