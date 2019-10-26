@@ -119,16 +119,12 @@ class NullAgent:
         return np.zeros(self.action_shape)
 
 
-class Agent:
+class SAC:
     def __init__(self, env, spec):
-        self.phi_mem = []
-        self.y_mem = []
-        self.eps = spec['agent']['eps']
-        self.mem_max_size = spec['agent']['mem_max_size']
         self.batch_size = spec['agent']['batch_size']
 
-        state_size = 12 + self.mem_max_size * 6
-        action_size = self.mem_max_size
+        state_size = env.observation_space.shape[0]
+        action_size = env.action_space.shape[0]
         hidden_size = spec['agent']['hidden_size']
 
         self.state_size = state_size
@@ -165,17 +161,6 @@ class Agent:
             dist = np.zeros(self.action_size)
 
         return dist
-
-    def mul_dist(self, dist, phi_mem, xs):
-        res = sum([
-            d * np.outer(phi, x) for d, phi, x in zip(dist, phi_mem, xs)
-        ])
-        return res
-
-    def get_dist(self, whole_state, phi_mem, y_mem):
-        dist = self.model(np.hstack((whole_state, phi_mem, y_mem)))
-        argmin = np.argmin(dist)
-        return dist, argmin
 
     def soft_q_update(self, batch_size, gamma=0.99, mean_lambda=1e-3,
                       std_lambda=1e-3, z_lambda=0.0, soft_tau=1e-2):

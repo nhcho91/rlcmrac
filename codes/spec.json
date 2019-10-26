@@ -14,19 +14,19 @@
 		]
 	},
 	"reference_system": {
-		"initial_state": [0.3, 0, 0],
+		"initial_state": [0, 0, 0],
 		"Ar": [[0, 1, 0], [-15.8, -5.6, -17.3], [1, 0, 0]],
 		"Br": [[0], [0], [-1]]
 	},
 	"adaptive_system": {
 		"initial_state": [[0], [0], [0], [0], [0]],
-		"gamma1": 1000,
-		"gamma2": 10,
+		"gamma1": 10000,
 		"Q": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 	},
 	"command": {
-		"period": 20,
-		"phase": 10
+		"length": 8,
+		"phase": 5,
+		"pattern": [2, 0, -2, 1, -1]
 	},
 	"filter_system": {
 		"initial_state": [0],
@@ -35,9 +35,12 @@
 	"filtered_phi": {
 		"initial_state": [0, 0, 0, 0, 0]
 	},
-	"memory": {
-		"max_size": 100,
-		"norm_eps": 1e-10
+	"composite_system": {
+		"gamma2": 10,
+		"memory": {
+			"max_size": 100,
+			"norm_eps": 1e-10
+		}
 	},
 	"agent": {
 		"batch_size": 128,

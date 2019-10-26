@@ -1,8 +1,10 @@
 import numpy as np
 
-from envs import MracEnv
-from agents import NullAgent
+from envs import CmracEnv
+from agents import SAC
 from utils import load_spec
+
+import torch
 
 import fym.logging as logging
 
@@ -21,25 +23,32 @@ def parse_data(env, data):
         },
         "cmd": cmd,
     })
-    logging.save('data/mrac/history.h5', data)
+    logging.save('data/rlcmrac/history.h5', data)
 
 
 def main():
     spec = load_spec('spec.json')
-    env = MracEnv(spec, data_callback=parse_data)
-    agent = NullAgent(env)
+    env = CmracEnv(spec, data_callback=parse_data)
+    agent = SAC(env, spec)
+    logger = logging.Logger(log_dir='data/rlcmrac', file_name='action.h5')
 
     obs = env.reset()
 
     while True:
-        action = agent.act(obs)
+        with torch.no_grad():
+            action = agent.act(obs)
 
         next_obs, reward, done, info = env.step(action)
+
+        logger.record(info)
+
+        obs = next_obs
 
         if done:
             break
 
     env.close()
+    logger.close()
 
 
 if __name__ == '__main__':
