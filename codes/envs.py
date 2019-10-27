@@ -160,6 +160,22 @@ class MracEnv(BaseEnv):
             data = logging.load(self.logger.path)
             self.data_callback(self, data)
 
+    def data_postprocessing(self, data):
+        xs = data['state']['main_system']
+        Ws = data['state']['adaptive_system']
+
+        cmd = np.hstack([self.cmd.get(t) for t in data['time']])
+        u_mrac = np.vstack(
+            [-W.T.dot(self.unc.basis(x)) for W, x in zip(Ws, xs)])
+
+        data.update({
+            "control": {
+                "MRAC": u_mrac,
+            },
+            "cmd": cmd,
+        })
+        return data
+
 
 class CmracEnv(MracEnv):
     def __init__(self, spec, data_callback):
@@ -249,22 +265,32 @@ class CmracEnv(MracEnv):
         wrapped_action = self.wrap_action(memory, action)
         next_states, full_hist = self.get_next_states(t, states, wrapped_action)
 
-        reduced_memory = self.reduce_memory(memory, action)
+        reduced_memory, removed_t = self.reduce_memory(memory, action)
 
         # Reward
-        reward = self.compute_reward(states, wrapped_action)
+        x, xr, _, _, _ = states.values()
+        e = x - xr
+        min_eigval = nla.eigvals(wrapped_action["M"]).min()
+        e_cost = e.dot(e)
+        reward = 1e2*min_eigval - 1e-2*e_cost
+        # reward = self.compute_reward(states, wrapped_action)
 
         # Terminal condition
         done = self.is_terminal()
 
         # Info
+        info_memory = {k: fill_nan(v, self.mem_max_size)
+                       for k, v in memory.items()}
+
         info = {
             "time": t,
-            "states": states,
+            "state": states,
             "action": action,
-            "memory": {
-                "time": memory["t"]
-            }
+            "memory": info_memory,
+            "removed": removed_t,
+            "min_eigval": min_eigval,
+            "tracking_error": e_cost,
+            "reward": reward,
         }
 
         # Updates
@@ -287,14 +313,16 @@ class CmracEnv(MracEnv):
 
     def reduce_memory(self, memory, action):
         t_mem, phi_mem, y_mem = memory["t"], memory["phi"], memory["y"]
+        removed_t = np.nan
         if len(phi_mem) == self.mem_max_size:
             argmin = np.argmin(action)
+            removed_t = t_mem[argmin]
             t_mem = np.delete(t_mem, argmin, axis=0)
             phi_mem = np.delete(phi_mem, argmin, axis=0)
             y_mem = np.delete(y_mem, argmin, axis=0)
 
         memory = {'t': t_mem, 'phi': phi_mem, 'y': y_mem}
-        return memory
+        return memory, removed_t
 
     def derivs(self, t, states, action):
         """
@@ -460,3 +488,12 @@ def mul_dist(dist, phi_mem, xs):
         d * np.outer(phi, x) for d, phi, x in zip(dist, phi_mem, xs)
     ])
     return res
+
+
+def fill_nan(arr, size, axis=0):
+    if arr.shape[axis] < size:
+        pad_width = [[0, 0] for _ in range(np.ndim(arr))]
+        pad_width[axis][1] = size - arr.shape[axis]
+        return np.pad(arr, pad_width, constant_values=np.nan)
+    else:
+        return arr

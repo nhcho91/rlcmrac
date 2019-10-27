@@ -48,26 +48,60 @@ def figure_2():
     This figure creates an animation that shows the history of what action was
     executed during the simulation.
     """
-    from matplotlib import animation
+    from matplotlib.animation import FuncAnimation
+    from collections import OrderedDict
 
-    data = logging.load("data/rlcmrac/history.h5")
-    action_data = logging.load("data/rlcmrac/action_history.h5")
+    episodic = logging.load("data/rlcmrac/episodic.h5")
 
-    fig, ax = plt.subplots()
+    fig, axes = plt.subplots(2, 1)
+    time, cmd, state1, ref1, ref2, state2, control = [[] for _ in range(7)]
+    lines = OrderedDict()
+    lines['cmd'], = axes[0].plot([], [], 'k--')
+    lines['state1'], = axes[0].plot([], [], 'r')
+    lines['state2'], = axes[0].plot([], [], 'b')
+    lines['ref1'], = axes[0].plot([], [], 'r--')
+    lines['ref2'], = axes[0].plot([], [], 'b--')
+    lines['memory'], = axes[1].plot([], [], 'g')
+    lines['control'], = axes[1].plot([], [])
+
+    max_action = episodic['action'].max()
 
     def init():
-        ax.set_xlim(0, data['time'].max())
-        ax.set_ylim(-2, 2)
+        [ax.set_xlim(0, episodic['time'].max()) for ax in axes]
+        axes[0].set_ylim(-3, 3)
+        axes[1].set_ylim(-300, 300)
+        return lines.values()
 
     def update(frame):
-        action = action_data[
-        ax.axvspan
-        return ln,
+        time.append(episodic['time'][frame])
+        cmd.append(episodic['cmd'][frame])
+        state1.append(episodic['state']['main_system'][frame][0])
+        state2.append(episodic['state']['main_system'][frame][1])
+        ref1.append(episodic['state']['reference_system'][frame][0])
+        ref2.append(episodic['state']['reference_system'][frame][1])
+        control.append(episodic['control']['MRAC'][frame])
 
-    anim = animation.FuncAnimation(
-        fig, update, init_func=init, frames=range(len(data['time'])),
-        interval=50, blit=True
+        # print(episodic['memory']['t'][frame])
+        time_action = episodic['memory']['t'][frame]
+        action = 300 / max_action * episodic['action'][frame]
+
+        episodic['memory']['t']
+
+        lines['cmd'].set_data(time, cmd)
+        lines['state1'].set_data(time, state1)
+        lines['state2'].set_data(time, state2)
+        lines['ref1'].set_data(time, ref1)
+        lines['ref2'].set_data(time, ref2)
+        lines['control'].set_data(time, control)
+
+        lines['memory'].set_data(time_action, action)
+        return lines.values()
+
+    anim = FuncAnimation(
+        fig, update, init_func=init,
+        frames=range(len(episodic['time'])), interval=1
     )
+    plt.show()
     # anim.save("media/rlcmrac_action_anim.mp4")
 
 

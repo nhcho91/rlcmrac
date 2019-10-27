@@ -4,6 +4,10 @@ Run multiple sessions for the same environment to generate statistical results.
 This is especially useful for the learning based system.
 The initial condition, noises, and weight intializations may be different for each sessions.
 
+We have to change the memory as a list. It is much faster than numpy append and remove.
+
+-[ ] Plotting
+
 ## Environments
 
 MRAC, Concurrent-learning MRAC, Concurrent Re-weighting MRAC
