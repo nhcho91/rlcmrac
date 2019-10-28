@@ -111,26 +111,18 @@ class PolicyNetwork(nn.Module):
         return action
 
 
-class NullAgent:
-    def __init__(self, env):
-        self.action_shape = env.action_space.shape
-
-    def act(self, obs):
-        return np.zeros(self.action_shape)
-
-
 class SAC:
     def __init__(self, env, spec):
-        self.batch_size = spec['agent']['batch_size']
+        self.batch_size = spec['agent']['sac']['batch_size']
 
         state_size = env.observation_space.shape[0]
         action_size = env.action_space.shape[0]
-        hidden_size = spec['agent']['hidden_size']
+        hidden_size = spec['agent']['sac']['hidden_size']
 
         self.state_size = state_size
         self.action_size = action_size
 
-        self.replay_buffer = ReplayBuffer(maxlen=spec['agent']['buffer_size'])
+        self.replay_buffer = ReplayBuffer(maxlen=spec['agent']['sac']['buffer_size'])
 
         # Networks
         self.value_net = ValueNetwork(state_size, hidden_size)
@@ -143,15 +135,15 @@ class SAC:
 
         self.value_optimizer = optim.Adam(
             self.value_net.parameters(),
-            lr=spec['agent']['value_lr']
+            lr=spec['agent']['sac']['value_lr']
         )
         self.soft_q_optimizer = optim.Adam(
             self.soft_q_net.parameters(),
-            lr=spec['agent']['soft_q_lr']
+            lr=spec['agent']['sac']['soft_q_lr']
         )
         self.policy_optimizer = optim.Adam(
             self.policy_net.parameters(),
-            lr=spec['agent']['policy_lr']
+            lr=spec['agent']['sac']['policy_lr']
         )
 
     def act(self, obs):
@@ -236,6 +228,14 @@ class ReplayBuffer:
 
     def __len__(self):
         return len(self.memory)
+
+
+class NullAgent:
+    def __init__(self, env, spec):
+        self.action_shape = env.action_space.shape
+
+    def act(self, obs):
+        return np.zeros(self.action_shape)
 
 
 if __name__ == '__main__':

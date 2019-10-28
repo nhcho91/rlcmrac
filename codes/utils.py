@@ -24,7 +24,7 @@ class Differentiator:
 
 def assign_2d(mat):
     mat = np.asarray(mat)
-    if mat.ndim != 2:
+    if not (mat.ndim == 2 or mat.ndim == 0):
         raise ValueError("The matrix should have 2 dimensions.")
     else:
         return mat

@@ -1,14 +1,8 @@
-from collections import OrderedDict
-from itertools import count
-
-import pydash as ps
-
 import numpy as np
 import numpy.linalg as nla
 import scipy.linalg as sla
-import scipy.signal
 
-from gym import spaces, Wrapper
+from gym import spaces
 
 from fym.core import BaseEnv, BaseSystem, infinite_box
 import fym.logging as logging
@@ -16,7 +10,7 @@ import fym.logging as logging
 from utils import assign_2d
 
 
-class MracEnv(BaseEnv):
+class Mrac(BaseEnv):
     def __init__(self, spec, data_callback=None):
         A = Ar = spec['reference_system']['Ar']
         B = spec['main_system']['B']
@@ -69,46 +63,31 @@ class MracEnv(BaseEnv):
             ode_step_len=spec['environment']['ode_step_len'],
         )
 
-    def reset(self):
-        """
-        Resets to the initial states of the systems.
-        """
-        states = super().reset()
-        t = self.clock.get()
-        return self.observation(t, states)
-
-    def observation(self, t, states):
-        """
-        This function converts all the states to a flat array.
-        """
-        x, xr, W, = states.values()
-        obs = np.hstack((
-            x,
-            xr,
-            W.ravel(),
-            self.cmd.get(t),
-        ))
-        return obs
-
     def step(self, action):
         states = self.states
-        t = self.clock.get()
+        time = self.clock.get()
 
-        next_states, full_hist = self.get_next_states(t, states, action)
+        next_states, full_hist = self.get_next_states(time, states, action)
 
         # Reward
-        reward = self.compute_reward()
+        reward = 0
 
         # Terminal condition
         done = self.is_terminal()
+
+        # Info
+        info = {
+            "time": time,
+            "state": states,
+            "action": action,
+            "reward": reward,
+        }
 
         # Updates
         self.states = next_states
         self.clock.tick()
 
-        t = self.clock.get()
-        obs = self.observation(t, next_states)
-        return obs, reward, done, {}
+        return states, reward, done, info
 
     def derivs(self, t, states, action):
         """
@@ -137,23 +116,6 @@ class MracEnv(BaseEnv):
     def compute_reward(self):
         return None
 
-    def parse_data(self, path):
-        data = logging.load(path)
-        xs = data['state']['main_system']
-        Ws = data['state']['adaptive_system']
-
-        cmd = np.hstack([self.cmd.get(t) for t in data['time']])
-        u_mrac = np.vstack(
-            [-W.T.dot(self.unc.basis(x)) for W, x in zip(Ws, xs)])
-
-        data.update({
-            "control": {
-                "MRAC": u_mrac,
-            },
-            "cmd": cmd,
-        })
-        return data
-
     def close(self):
         super().close()
         if self.data_callback is not None:
@@ -169,20 +131,17 @@ class MracEnv(BaseEnv):
             [-W.T.dot(self.unc.basis(x)) for W, x in zip(Ws, xs)])
 
         data.update({
-            "control": {
-                "MRAC": u_mrac,
-            },
+            "control": u_mrac,
             "cmd": cmd,
         })
         return data
 
 
-class CmracEnv(MracEnv):
+class Cmrac(Mrac):
     def __init__(self, spec, data_callback):
         super().__init__(spec, data_callback)
         self.gamma2 = spec['composite_system']['gamma2']
-        self.mem_max_size = spec["composite_system"]["memory"]["max_size"]
-        self.eps = spec['composite_system']['memory']['norm_eps']
+        self.norm_eps = spec["memory"]["norm_eps"]
 
         new_systems = {
             'filter_system': FilterSystem(
@@ -199,7 +158,152 @@ class CmracEnv(MracEnv):
         }
         self.append_systems(new_systems)
 
+        M_shape = self.systems["adaptive_system"].state_shape[:1] * 2
+        N_shape = self.systems["adaptive_system"].state_shape
+
+        self.action_space = spaces.Dict({
+            "M": infinite_box(M_shape),
+            "N": infinite_box(N_shape)
+        })
+
+    def reset(self):
+        states = super().reset()
+        time = self.clock.get()
+        return self.observation(time, states)
+
+    def step(self, action):
+        next_states, reward, done, info = super().step(action)
+        next_time = self.clock.get()
+        return self.observation(next_time, next_states), reward, done, info
+
+    def observation(self, time, states):
+        """
+        This function converts all the states including the memories to a
+        flat array.
+        """
+        x, xr, _, z, phif = states.values()
+        e = x - xr
+        phif_norm = nla.norm(phif) + self.norm_eps
+        normed_y = self.systems['filter_system'].get_y(z, e) / phif_norm
+        normed_phif = phif / phif_norm
+        obs = dict(
+            **states,
+            time=time,
+            normed_y=normed_y,
+            normed_phif=normed_phif
+        )
+        return obs
+
+    def derivs(self, t, states, action):
+        """
+        The argument ``action`` here is the composite term of the CMRAC which
+        has a matrix form.
+        """
+        x, xr, W, z, phif = states.values()
+        M, N = action['M'], action['N']
+
+        e = x - xr
+        u = -W.T.dot(self.unc.basis(x))
+
+        xdot = {
+            'main_system': self.systems['main_system'].deriv(t, x, u),
+            'reference_system': self.systems['reference_system'].deriv(t, xr),
+            'adaptive_system': self.systems['adaptive_system'].deriv(
+                W, x, e) - np.dot(self.gamma2, M.dot(W) - N),
+            'filter_system': self.systems['filter_system'].deriv(z, e, u),
+            'filtered_phi': self.systems['filtered_phi'].deriv(phif, x),
+        }
+        return self.unpack_state(xdot)
+
+
+class FeCmrac(Cmrac):
+    def __init__(self, spec, data_callback):
+        super().__init__(spec, data_callback)
+        self.kl = spec["fecmrac"]["kl"]
+        self.ku = spec["fecmrac"]["ku"]
+        self.theta = spec["fecmrac"]["theta"]
+
+        Omega_shape = self.systems["adaptive_system"].state_shape[:1] * 2
+        M_shape = self.systems["adaptive_system"].state_shape
+
+        new_systems = {
+            'omega_system': MemorySystem(
+                initial_state=np.zeros(Omega_shape),
+            ),
+            'm_system': MemorySystem(
+                initial_state=np.zeros(M_shape),
+            ),
+        }
+        self.append_systems(new_systems)
+        self.action_space = infinite_box((0,))
+
+    def observation(self, time, states):
+        """
+        This function converts all the states including the memories to a
+        flat array.
+        """
+        x, xr, _, z, phif, omega, m = states.values()
+        e = x - xr
+        phif_norm = nla.norm(phif) + self.norm_eps
+        normed_y = self.systems['filter_system'].get_y(z, e) / phif_norm
+        normed_phif = phif / phif_norm
+        obs = dict(
+            **states,
+            time=time,
+            normed_y=normed_y,
+            normed_phif=normed_phif
+        )
+        return obs
+
+    def derivs(self, t, states, action):
+        x, xr, W, z, phif, omega, m = states.values()
+
+        e = x - xr
+        phi = self.unc.basis(x)
+        u = -W.T.dot(phi)
+
+        phif_norm = nla.norm(phif) + self.norm_eps
+        normed_y = self.systems["filter_system"].get_y(z, e) / phif_norm
+        normed_phif = phif / phif_norm
+        normed_dot_phif = (
+            1 / self.systems["filter_system"].tau
+            * (phi - phif) / phif_norm
+        )
+        k = (
+            self.kl
+            + (self.ku - self.kl) * np.tanh(
+                self.theta * nla.norm(normed_dot_phif)
+            )
+        )
+
+        M = omega
+        N = m
+
+        xdot = {
+            'main_system': self.systems['main_system'].deriv(t, x, u),
+            'reference_system': self.systems['reference_system'].deriv(t, xr),
+            'adaptive_system': self.systems['adaptive_system'].deriv(
+                W, x, e) - np.dot(self.gamma2, M.dot(W) - N),
+            'filter_system': self.systems['filter_system'].deriv(z, e, u),
+            'filtered_phi': self.systems['filtered_phi'].deriv(phif, x),
+            'omega_system': self.systems['omega_system'].deriv(
+                omega, k, normed_phif, normed_phif),
+            'm_system': self.systems['m_system'].deriv(
+                m, k, normed_phif, normed_y),
+        }
+        return self.unpack_state(xdot)
+
+
+class RlCmrac(Cmrac):
+    def __init__(self, spec, data_callback):
+        super().__init__(spec, data_callback)
+        self.mem_max_size = spec["memory"]["max_size"]
+        self.norm_eps = spec["memory"]["norm_eps"]
+
         W_shape = np.shape(spec["adaptive_system"]["initial_state"])
+        self.phi_size = W_shape[0]
+        self.y_size = W_shape[1]
+
         self.observation_space = infinite_box((
             len(spec['main_system']['initial_state'])
             + len(spec['reference_system']['initial_state'])
@@ -209,37 +313,19 @@ class CmracEnv(MracEnv):
         ))
         self.action_space = infinite_box((self.mem_max_size,))
 
-        # Memory
-        self.phi_size = W_shape[0]
-        self.y_size = W_shape[1]
-        self.memory = {}
-
     def reset(self):
-        states = super(MracEnv, self).reset()
+        states = super().reset()
         time = self.clock.get()
         memory = {
             't': np.empty((0,)),
             'phi': np.empty((0, self.phi_size)),
             'y': np.empty((0, self.y_size))
         }
-        self.memory = self.update_memory(memory, time, states)
-        return self.observation(time, states, self.memory)
+        memory = self.update_memory(memory, time, states)
 
-    def update_memory(self, memory, time, states):
-        """
-        This function stacks the state informations to the memories,
-        and returns them.
-        """
-        x, xr, _, z, phif = states.values()
-        e = x - xr
-        y = self.systems['filter_system'].get_y(z, e)
-        norm_phif = nla.norm(phif) + self.eps
-
-        t_mem = np.hstack((memory['t'], time))
-        phi_mem = np.vstack((memory['phi'], phif / norm_phif))
-        y_mem = np.vstack((memory['y'], y / norm_phif))
-        memory = {'t': t_mem, 'phi': phi_mem, 'y': y_mem}
-        return memory
+        self.states = states
+        self.memory = memory
+        return self.observation(time, states, memory)
 
     def observation(self, time, states, memory):
         """
@@ -257,13 +343,28 @@ class CmracEnv(MracEnv):
         ))
         return obs
 
+    def update_memory(self, memory, time, states):
+        """
+        This function stacks the state informations to the memories,
+        and returns them.
+        """
+        x, xr, _, z, phif = states.values()
+        e = x - xr
+        y = self.systems['filter_system'].get_y(z, e)
+        phif_norm = nla.norm(phif) + self.norm_eps
+
+        t_mem = np.hstack((memory['t'], time))
+        phi_mem = np.vstack((memory['phi'], phif / phif_norm))
+        y_mem = np.vstack((memory['y'], y / phif_norm))
+        memory = {'t': t_mem, 'phi': phi_mem, 'y': y_mem}
+        return memory
+
     def step(self, action):
         states = self.states
         memory = self.memory
-        t = self.clock.get()
 
         wrapped_action = self.wrap_action(memory, action)
-        next_states, full_hist = self.get_next_states(t, states, wrapped_action)
+        next_states, reward, done, info = super().step(wrapped_action)
 
         reduced_memory, removed_t = self.reduce_memory(memory, action)
 
@@ -273,7 +374,6 @@ class CmracEnv(MracEnv):
         min_eigval = nla.eigvals(wrapped_action["M"]).min()
         e_cost = e.dot(e)
         reward = 1e2*min_eigval - 1e-2*e_cost
-        # reward = self.compute_reward(states, wrapped_action)
 
         # Terminal condition
         done = self.is_terminal()
@@ -282,27 +382,26 @@ class CmracEnv(MracEnv):
         info_memory = {k: fill_nan(v, self.mem_max_size)
                        for k, v in memory.items()}
 
-        info = {
-            "time": t,
-            "state": states,
+        info.update({
             "action": action,
+            "wrapped_action": wrapped_action,
             "memory": info_memory,
             "removed": removed_t,
             "min_eigval": min_eigval,
             "tracking_error": e_cost,
-            "reward": reward,
-        }
+        })
 
-        # Updates
-        self.states = next_states
-        self.clock.tick()
-
-        t = self.clock.get()
-        next_memory = self.update_memory(reduced_memory, t, next_states)
+        # Update
+        next_time = self.clock.get()
+        next_memory = self.update_memory(reduced_memory, next_time, next_states)
         self.memory = next_memory
 
-        obs = self.observation(t, next_states, next_memory)
-        return obs, reward, done, info
+        return (
+            self.observation(next_time, next_states, next_memory),
+            reward,
+            done,
+            info
+        )
 
     def wrap_action(self, memory, action):
         phi_mem, y_mem = memory["phi"], memory["y"]
@@ -323,36 +422,6 @@ class CmracEnv(MracEnv):
 
         memory = {'t': t_mem, 'phi': phi_mem, 'y': y_mem}
         return memory, removed_t
-
-    def derivs(self, t, states, action):
-        """
-        The argument ``action`` here is the composite term of the CMRAC which
-        has a matrix form.
-        """
-        x, xr, W, z, phif = states.values()
-        M, N = action['M'], action['N']
-
-        e = x - xr
-        u = -W.T.dot(self.unc.basis(x))
-
-        xdot = OrderedDict.fromkeys(self.systems)
-        xdot.update({
-            'main_system': self.systems['main_system'].deriv(t, x, u),
-            'reference_system': self.systems['reference_system'].deriv(t, xr),
-            'adaptive_system': self.systems['adaptive_system'].deriv(
-                W, x, e) - np.dot(self.gamma2, M.dot(W) - N),
-            'filter_system': self.systems['filter_system'].deriv(z, e, u),
-            'filtered_phi': self.systems['filtered_phi'].deriv(phif, x),
-        })
-        return self.unpack_state(xdot)
-
-    def compute_reward(self, states, action):
-        x, xr, _, _, _ = states.values()
-        e = x - xr
-        min_eigval = nla.eigvals(action["M"]).min()
-        e_cost = e.dot(e)
-        reward = 1e2*min_eigval - 1e-2*e_cost
-        return reward
 
 
 class ParamUnc:
@@ -396,6 +465,15 @@ class SquareCmd:
         else:
             s = 0
         return np.atleast_1d(s)
+
+
+class MemorySystem(BaseSystem):
+    def __init__(self, initial_state):
+        super().__init__(initial_state=initial_state)
+
+    def deriv(self, x, k, u1, u2):
+        xdot = - k * x + np.outer(u1, u2)
+        return xdot
 
 
 class MainSystem(BaseSystem):

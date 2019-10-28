@@ -6,7 +6,7 @@ import fym.logging as logging
 
 
 def figure_1():
-    data_mrac = logging.load("data/rlcmrac/history.h5")
+    data_mrac = logging.load("data/fecmrac-nullagent/history.h5")
 
     plt.figure(num='state 1', figsize=[6.4, 4.8])
     plt.plot(
@@ -22,7 +22,7 @@ def figure_1():
     plt.plot(
         data_mrac['time'],
         data_mrac['state']['main_system'][:, 0],
-        'r-.',
+        'r--',
     )
 
     plt.figure(num='state 2', figsize=[6.4, 4.8])
@@ -34,11 +34,11 @@ def figure_1():
     plt.plot(
         data_mrac['time'],
         data_mrac['state']['main_system'][:, 1],
-        'r-.',
+        'r--',
     )
 
     plt.figure(num='control')
-    plt.plot(data_mrac['time'], data_mrac['control']['MRAC'])
+    plt.plot(data_mrac['time'], data_mrac['control'])
 
     plt.show()
 
@@ -61,7 +61,11 @@ def figure_2():
     lines['state2'], = axes[0].plot([], [], 'b')
     lines['ref1'], = axes[0].plot([], [], 'r--')
     lines['ref2'], = axes[0].plot([], [], 'b--')
-    lines['memory'], = axes[1].plot([], [], 'g')
+    lines['memory'] = axes[1].stem(
+        [0], [0],
+        use_line_collection=True,
+        linefmt='r',
+    )
     lines['control'], = axes[1].plot([], [])
 
     max_action = episodic['action'].max()
@@ -72,6 +76,9 @@ def figure_2():
         axes[1].set_ylim(-300, 300)
         return lines.values()
 
+    def to_segments(xs, ys):
+        return [[[x, 0], [x, y]] for x, y in zip(xs, ys)]
+
     def update(frame):
         time.append(episodic['time'][frame])
         cmd.append(episodic['cmd'][frame])
@@ -79,11 +86,12 @@ def figure_2():
         state2.append(episodic['state']['main_system'][frame][1])
         ref1.append(episodic['state']['reference_system'][frame][0])
         ref2.append(episodic['state']['reference_system'][frame][1])
-        control.append(episodic['control']['MRAC'][frame])
+        control.append(episodic['control'][frame])
 
         # print(episodic['memory']['t'][frame])
         time_action = episodic['memory']['t'][frame]
         action = 300 / max_action * episodic['action'][frame]
+        segments = to_segments(time_action, action)
 
         episodic['memory']['t']
 
@@ -94,26 +102,28 @@ def figure_2():
         lines['ref2'].set_data(time, ref2)
         lines['control'].set_data(time, control)
 
-        lines['memory'].set_data(time_action, action)
+        lines['memory'].stemlines.set_segments(segments)
         return lines.values()
 
     anim = FuncAnimation(
         fig, update, init_func=init,
-        frames=range(len(episodic['time'])), interval=1
+        frames=range(0, len(episodic['time']), 10), interval=1
     )
     plt.show()
     # anim.save("media/rlcmrac_action_anim.mp4")
 
 
 def main(args):
-    figure_2()
-    return None
-
     if args.all:
         figure_1()
+        figure_2()
 
     if args.num == 1:
         figure_1()
+    elif args.num == 2:
+        figure_2()
+
+    plt.show()
 
 
 if __name__ == '__main__':

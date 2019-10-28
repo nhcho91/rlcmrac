@@ -1,6 +1,6 @@
 import numpy as np
 
-from envs import CmracEnv
+from envs import RlCmracEnv
 from agents import SAC
 from utils import load_spec
 import os
@@ -20,7 +20,7 @@ def parse_data(env, data):
 
 def main():
     spec = load_spec('spec.json')
-    env = CmracEnv(spec, data_callback=parse_data)
+    env = RlCmracEnv(spec, data_callback=parse_data)
     agent = SAC(env, spec)
     logger = logging.Logger(log_dir=BASE_LOG_DIR, file_name='episodic.h5')
 
@@ -31,6 +31,8 @@ def main():
             action = agent.act(obs)
 
         next_obs, reward, done, info = env.step(action)
+
+        agent.update(obs, action, reward, next_obs, done)
 
         logger.record(**info)
 

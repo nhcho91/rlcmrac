@@ -3,7 +3,8 @@
 		"time_step": 0.01,
 		"final_time": 60,
 		"ode_step_len": 3,
-		"seed": 1
+		"seed": 1,
+		"base_log_dir": "log"
 	},
 	"main_system": {
 		"initial_state": [0.3, 0, 0],
@@ -36,19 +37,26 @@
 		"initial_state": [0, 0, 0, 0, 0]
 	},
 	"composite_system": {
-		"gamma2": 10,
-		"memory": {
-			"max_size": 100,
-			"norm_eps": 1e-10
-		}
+		"gamma2": 10
+	},
+	"fecmrac": {
+		"kl": 0.1,
+		"ku": 10,
+		"theta": 0.1
+	},
+	"memory": {
+		"max_size": 100,
+		"norm_eps": 1e-10
 	},
 	"agent": {
-		"batch_size": 128,
-		"hidden_size": 32,
-		"buffer_size": 1e4,
-		"value_lr": 1e-4,
-		"soft_q_lr": 1e-4,
-		"policy_lr": 1e-4,
-		"model_log_dir": "log/model"
+		"sac": {
+			"batch_size": 128,
+			"hidden_size": 32,
+			"buffer_size": 1e4,
+			"value_lr": 1e-4,
+			"soft_q_lr": 1e-4,
+			"policy_lr": 1e-4,
+			"model_log_dir": "log/model"
+		}
 	}
 }

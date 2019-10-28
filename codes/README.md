@@ -1,12 +1,15 @@
 ## Todo
 
+- [ ] Concurrent Learning Agent
+- [ ] Plot the reward graph
+- [ ] Compare the results
+- [ ] Make it easy to search the hyperparameters
+- [ ] Create action wrappers for various agent so that the environment only takes the `M` and `N` as its inputs.
 Run multiple sessions for the same environment to generate statistical results.
 This is especially useful for the learning based system.
 The initial condition, noises, and weight intializations may be different for each sessions.
 
-We have to change the memory as a list. It is much faster than numpy append and remove.
 
--[ ] Plotting
 
 ## Environments
 
@@ -51,9 +54,3 @@ python plot.py --compare data/{...} data/{...}
 ```
 python plot.py --anim data/{...}
 ```
-
-
-
-## Logger
-
-The `Logger` module can be used as
