@@ -1,30 +1,40 @@
-# README
+# RL-Based Composite MRAC
 
 ## Installation
 
-`environment.yml` 파일을 이용해서 `conda` 가상환경을 만든다.
+You need to install a python package, the FDCL NRF Fym.
+There are two ways to install this package.
 
+1. Using an enclosed submodule
+
+First, you can clone this repository with a fym submodule.
 ```bash
-$ conda env create -f environment.yml
+$ git clone --recurse-submodules https://github.com/seong-hun/rlcmrac.git
 ```
-
-가상환경은 프로젝트 루트 디렉터리에 `.envs` 라는 이름으로 만들어진다.
-이제, `.envs`를 활성화 할 수 있다.
-
+Then, create a virtual environment.
+We recommend to use `conda` to install the virtual environment with a provided `environment.yml` file.
 ```bash
-$ conda activate ./.envs
+$ conda env create -n rlcmrac -f environment.yml
+$ conda activate rlcmrac
 ```
-
-긴 prefix를 줄이고 싶다면 다음 명령어를 입력한다
+Now change to the submodule directory and install the `fym` package.
 ```bash
-$ conda config --set env_prompt '({name})'
-```
-
-다음으로 `fym` 패키지를 설치한다.
-
-```bash
-$ cd ..
-$ git clone https://github.com/fdcl-nrf/fym.git
-$ cd fym
+$ cd submodules/fym
 $ pip install -e .
+```
+
+2. Directly clone the Fym repository
+
+*TBD*
+
+## Run the Simulation
+
+To run all the simulations,
+```bash
+$ python main.py --all
+```
+
+If you want to plot the result after the running, you can use `--plot` option.
+```bash
+$ python main.py --all --plot
 ```

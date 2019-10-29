@@ -1,6 +1,5 @@
 import numpy as np
 from collections import deque
-import pydash as ps
 import ujson
 
 
@@ -28,16 +27,6 @@ def assign_2d(mat):
         raise ValueError("The matrix should have 2 dimensions.")
     else:
         return mat
-
-
-def set_attr(obj, attr_dict, keys=None, to_numpy=True):
-    """Set attribute of an object from a dict"""
-    attr_dict = ps.pick(attr_dict, keys or list(attr_dict.keys()))
-    for attr, val in attr_dict.items():
-        if isinstance(val, np.ndarray) or isinstance(val, list):
-            val = np.asarray(val)
-        setattr(obj, attr, val)
-    return obj
 
 
 def load_spec(file):

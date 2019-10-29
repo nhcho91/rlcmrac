@@ -1,0 +1,3 @@
+[submodule "submodules/fym"]
+	path = submodules/fym
+	url = git@github.com:fdcl-nrf/fym.git
