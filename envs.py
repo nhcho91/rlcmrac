@@ -158,41 +158,13 @@ class Cmrac(Mrac):
         }
         self.append_systems(new_systems)
 
-        M_shape = self.systems["adaptive_system"].state_shape[:1] * 2
-        N_shape = self.systems["adaptive_system"].state_shape
+        self.M_shape = self.systems["adaptive_system"].state_shape[:1] * 2
+        self.N_shape = self.systems["adaptive_system"].state_shape
 
         self.action_space = spaces.Dict({
-            "M": infinite_box(M_shape),
-            "N": infinite_box(N_shape)
+            "M": infinite_box(self.M_shape),
+            "N": infinite_box(self.N_shape)
         })
-
-    def reset(self):
-        states = super().reset()
-        time = self.clock.get()
-        return self.observation(time, states)
-
-    def step(self, action):
-        next_states, reward, done, info = super().step(action)
-        next_time = self.clock.get()
-        return self.observation(next_time, next_states), reward, done, info
-
-    def observation(self, time, states):
-        """
-        This function converts all the states including the memories to a
-        flat array.
-        """
-        x, xr, _, z, phif = states.values()
-        e = x - xr
-        phif_norm = nla.norm(phif) + self.norm_eps
-        normed_y = self.systems['filter_system'].get_y(z, e) / phif_norm
-        normed_phif = phif / phif_norm
-        obs = dict(
-            **states,
-            time=time,
-            normed_y=normed_y,
-            normed_phif=normed_phif
-        )
-        return obs
 
     def derivs(self, t, states, action):
         """
@@ -223,40 +195,81 @@ class FeCmrac(Cmrac):
         self.ku = spec["fecmrac"]["ku"]
         self.theta = spec["fecmrac"]["theta"]
 
-        Omega_shape = self.systems["adaptive_system"].state_shape[:1] * 2
-        M_shape = self.systems["adaptive_system"].state_shape
-
         new_systems = {
             'omega_system': MemorySystem(
-                initial_state=np.zeros(Omega_shape),
+                initial_state=np.zeros(self.M_shape),
             ),
             'm_system': MemorySystem(
-                initial_state=np.zeros(M_shape),
+                initial_state=np.zeros(self.N_shape),
             ),
         }
         self.append_systems(new_systems)
         self.action_space = infinite_box((0,))
 
-    def observation(self, time, states):
-        """
-        This function converts all the states including the memories to a
-        flat array.
-        """
-        x, xr, _, z, phif, omega, m = states.values()
-        e = x - xr
+    def reset(self):
+        states = super().reset()
+        omega_a, m_a = states['omega_system'], states['m_system']
+        memory = {
+            'time': self.clock.get(),
+            'saved_eig': nla.eigvals(omega_a).min(),
+            'omega_a': omega_a,
+            'm_a': m_a
+        }
+        self.memory = memory
+        return states
+
+    def step(self, action):
+        states = self.states
+        memory = self.memory
+        action = {k: memory[k] for k in ['omega_a', 'm_a']}
+
+        next_states, reward, done, info = super(Cmrac, self).step(action)
+
+        # Info
+        k = self.get_k(states)
+        info.update({
+            "action": action,
+            "memory": memory,
+            "k": k
+        })
+
+        # Update the buffer
+        next_time = self.clock.get()
+
+        next_omega, next_m = [
+            next_states[k] for k in ['omega_system', 'm_system']
+        ]
+        next_eig = nla.eigvals(next_omega).min()
+        if next_eig >= memory['saved_eig']:
+            next_memory = {
+                **memory,
+                'time': next_time,
+                'saved_eig': next_eig,
+                'omega_a': next_omega,
+                'm_a': next_m
+            }
+        else:
+            next_memory = memory
+
+        self.memory = next_memory
+        return next_states, reward, done, info
+
+    def get_k(self, states):
+        x, phif = states['main_system'], states['filtered_phi']
         phif_norm = nla.norm(phif) + self.norm_eps
-        normed_y = self.systems['filter_system'].get_y(z, e) / phif_norm
-        normed_phif = phif / phif_norm
-        obs = dict(
-            **states,
-            time=time,
-            normed_y=normed_y,
-            normed_phif=normed_phif
+        dot_phif = self.systems['filtered_phi'].deriv(phif, x)
+        normed_dot_phif = dot_phif / phif_norm
+        k = (
+            self.kl
+            + (self.ku - self.kl) * np.tanh(
+                self.theta * nla.norm(normed_dot_phif)
+            )
         )
-        return obs
+        return k
 
     def derivs(self, t, states, action):
         x, xr, W, z, phif, omega, m = states.values()
+        omega_a, m_a = action['omega_a'], action['m_a']
 
         e = x - xr
         phi = self.unc.basis(x)
@@ -265,25 +278,13 @@ class FeCmrac(Cmrac):
         phif_norm = nla.norm(phif) + self.norm_eps
         normed_y = self.systems["filter_system"].get_y(z, e) / phif_norm
         normed_phif = phif / phif_norm
-        normed_dot_phif = (
-            1 / self.systems["filter_system"].tau
-            * (phi - phif) / phif_norm
-        )
-        k = (
-            self.kl
-            + (self.ku - self.kl) * np.tanh(
-                self.theta * nla.norm(normed_dot_phif)
-            )
-        )
-
-        M = omega
-        N = m
+        k = self.get_k(states)
 
         xdot = {
             'main_system': self.systems['main_system'].deriv(t, x, u),
             'reference_system': self.systems['reference_system'].deriv(t, xr),
             'adaptive_system': self.systems['adaptive_system'].deriv(
-                W, x, e) - np.dot(self.gamma2, M.dot(W) - N),
+                W, x, e) - np.dot(self.gamma2, omega_a.dot(W) - m_a),
             'filter_system': self.systems['filter_system'].deriv(z, e, u),
             'filtered_phi': self.systems['filtered_phi'].deriv(phif, x),
             'omega_system': self.systems['omega_system'].deriv(
@@ -373,7 +374,7 @@ class RlCmrac(Cmrac):
         e = x - xr
         min_eigval = nla.eigvals(wrapped_action["M"]).min()
         e_cost = e.dot(e)
-        reward = 1e2*min_eigval - 1e-2*e_cost
+        reward = 1e2 * min_eigval - 1e-2 * e_cost
 
         # Terminal condition
         done = self.is_terminal()
@@ -432,7 +433,7 @@ class ParamUnc:
         return self.W.T.dot(self.basis(state))
 
     def basis(self, x):
-        return np.hstack((x[:2], np.abs(x[:2])*x[1], x[0]**3))
+        return np.hstack((x[:2], np.abs(x[:2]) * x[1], x[0]**3))
 
 
 class SquareCmd:

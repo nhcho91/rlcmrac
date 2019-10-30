@@ -1,5 +1,6 @@
 import sys
 import argparse
+import numpy as np
 import matplotlib.pyplot as plt
 
 import fym.logging as logging
@@ -113,6 +114,77 @@ def figure_2():
     # anim.save("media/rlcmrac_action_anim.mp4")
 
 
+def figure_3():
+    """
+    This figure creates an animation that shows the history of what action was
+    executed during the simulation.
+    """
+    from matplotlib.animation import FuncAnimation
+    from collections import OrderedDict
+
+    episodic = logging.load("data/fecmrac-nullagent/episodic.h5")
+
+    fig, axes = plt.subplots(2, 1)
+    time, cmd, state1, ref1, ref2, state2, control = [[] for _ in range(7)]
+    lines = OrderedDict()
+    lines['cmd'], = axes[0].plot([], [], 'k--')
+    lines['state1'], = axes[0].plot([], [], 'r')
+    lines['state2'], = axes[0].plot([], [], 'b')
+    lines['ref1'], = axes[0].plot([], [], 'r--')
+    lines['ref2'], = axes[0].plot([], [], 'b--')
+    lines['memory'] = axes[1].fill_between([], [])
+    lines['control'], = axes[1].plot([], [])
+
+    fill_option = dict(alpha=0.6, facecolor='r')
+
+    control_max = episodic['control'].max()
+
+    def init():
+        [ax.set_xlim(0, episodic['time'].max()) for ax in axes]
+        axes[0].set_ylim(-3, 3)
+        axes[1].set_ylim(-300, 300)
+        return lines.values()
+
+    def update(frame):
+        time.append(episodic['time'][frame])
+        cmd.append(episodic['cmd'][frame])
+        state1.append(episodic['state']['main_system'][frame][0])
+        state2.append(episodic['state']['main_system'][frame][1])
+        ref1.append(episodic['state']['reference_system'][frame][0])
+        ref2.append(episodic['state']['reference_system'][frame][1])
+        control.append(episodic['control'][frame])
+
+        ta_idx = np.argmax(
+            episodic['time'] > episodic['memory']['time'][frame]
+        )
+        dist_time = episodic['time'][:ta_idx]
+        dist_k = episodic['k'][:ta_idx]
+        dist = [
+            control_max * np.exp(-np.trapz(dist_k[i:], dist_time[i:]))
+            for i in range(len(dist_time))
+        ]
+
+        episodic['memory']['time']
+
+        lines['cmd'].set_data(time, cmd)
+        lines['state1'].set_data(time, state1)
+        lines['state2'].set_data(time, state2)
+        lines['ref1'].set_data(time, ref1)
+        lines['ref2'].set_data(time, ref2)
+        lines['control'].set_data(time, control)
+
+        lines['memory'].axes.collections.clear()
+        lines['memory'].axes.fill_between(dist_time, dist, **fill_option)
+        return lines.values()
+
+    anim = FuncAnimation(
+        fig, update, init_func=init,
+        frames=range(0, len(episodic['time']), 10), interval=1
+    )
+    plt.show()
+    # anim.save("media/rlcmrac_action_anim.mp4")
+
+
 def main(args):
     if args.all:
         figure_1()
@@ -122,6 +194,10 @@ def main(args):
         figure_1()
     elif args.num == 2:
         figure_2()
+    elif args.num == 3:
+        figure_3()
+    else:
+        raise ValueError(f"The figure {args.num} is not found")
 
     plt.show()
 
