@@ -12,7 +12,8 @@ First, you can clone this repository with a fym submodule.
 $ git clone --recurse-submodules https://github.com/seong-hun/rlcmrac.git
 ```
 Then, create a virtual environment.
-We recommend to use `conda` to install the virtual environment with a provided `environment.yml` file.
+We recommend to use `conda` to install the virtual environment with a provided
+`environment.yml` file.
 ```bash
 $ conda env create -n rlcmrac -f environment.yml
 $ conda activate rlcmrac
@@ -55,4 +56,6 @@ $ python main.py --all --plot
 
 ## Data
 
-You can [download](https://drive.google.com/open?id=1KXMruwCM9TdxOYU5bwizMyVtlDfnUaIp) the data from my Goole Drive
+You can [download][datalink] the data from my Goole Drive
+
+[datalink]: https://drive.google.com/open?id=1kTw3yxDszvSGGjyYmWTCfXRitMNxcECK
