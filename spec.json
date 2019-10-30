@@ -27,7 +27,7 @@
 	"command": {
 		"length": 8,
 		"phase": 5,
-		"pattern": [2, 0, -2, 1, -1]
+		"pattern": [2, 0, 0, 0, 0]
 	},
 	"filter_system": {
 		"initial_state": [0],
