@@ -7,39 +7,50 @@ import fym.logging as logging
 
 
 def figure_1():
-    data_mrac = logging.load("data/fecmrac-nullagent/history.h5")
+    # data = logging.load("data/fecmrac-nullagent/episodic.h5")
+    data = logging.load("data/rlcmrac-sac/episodic.h5")
 
     plt.figure(num='state 1', figsize=[6.4, 4.8])
     plt.plot(
-        data_mrac['time'],
-        data_mrac['cmd'],
+        data['time'],
+        data['cmd'],
         'k--',
     )
     plt.plot(
-        data_mrac['time'],
-        data_mrac['state']['reference_system'][:, 0],
+        data['time'],
+        data['state']['reference_system'][:, 0],
         'k',
     )
     plt.plot(
-        data_mrac['time'],
-        data_mrac['state']['main_system'][:, 0],
+        data['time'],
+        data['state']['main_system'][:, 0],
         'r--',
     )
 
     plt.figure(num='state 2', figsize=[6.4, 4.8])
     plt.plot(
-        data_mrac['time'],
-        data_mrac['state']['reference_system'][:, 1],
+        data['time'],
+        data['state']['reference_system'][:, 1],
         'k',
     )
     plt.plot(
-        data_mrac['time'],
-        data_mrac['state']['main_system'][:, 1],
+        data['time'],
+        data['state']['main_system'][:, 1],
         'r--',
     )
 
     plt.figure(num='control')
-    plt.plot(data_mrac['time'], data_mrac['control'])
+    plt.plot(data['time'], data['control'])
+
+    fig, axes = plt.subplots(2, 1, num='minimum eigenvalue', sharex=True)
+    min_eig = np.min(data['eigs'], axis=1)
+    # hidden_min_eig = np.min(data['hidden_eigs'], axis=1)
+    max_eig = np.max(data['eigs'], axis=1)
+    # hidden_max_eig = np.max(data['hidden_eigs'], axis=1)
+    axes[0].plot(data['time'], min_eig)
+    # axes[0].plot(data['time'], hidden_min_eig, '--')
+    axes[1].plot(data['time'], max_eig)
+    # axes[1].plot(data['time'], hidden_max_eig, '--')
 
     plt.show()
 

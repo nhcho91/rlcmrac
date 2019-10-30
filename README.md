@@ -27,11 +27,25 @@ $ pip install -e .
 
 *TBD*
 
+
 ## Run the Simulation
 
-To run all the simulations,
+1. MRAC
+
 ```bash
-$ python main.py --all
+$ python main.py --env mrac
+```
+
+2. FeCmrac
+
+```bash
+$ python main.py --env FeCmrac
+```
+
+3. RlCmrac
+
+```bash
+$ python main.py --env RlCmrac --agent SAC
 ```
 
 If you want to plot the result after the running, you can use `--plot` option.

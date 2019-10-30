@@ -79,7 +79,6 @@ class Mrac(BaseEnv):
         info = {
             "time": time,
             "state": states,
-            "action": action,
             "reward": reward,
         }
 
@@ -112,9 +111,6 @@ class Mrac(BaseEnv):
             return True
         else:
             return False
-
-    def compute_reward(self):
-        return None
 
     def close(self):
         super().close()
@@ -167,13 +163,20 @@ class Cmrac(Mrac):
         })
 
     def step(self, action):
+        """
+        Parameters
+        ----------
+        action: dict
+            A dictionary with keys `M` and `N`.
+        """
         next_states, reward, done, info = super().step(action)
 
         eigvals = nla.eigvals(action["M"])
 
         info.update({
-            "min_eig": eigvals.min(),
-            "max_eig": eigvals.max()
+            "eigs": eigvals,
+            "M": action["M"],
+            "N": action["N"],
         })
         return next_states, reward, done, info
 
@@ -243,8 +246,7 @@ class FeCmrac(Cmrac):
         info.update({
             "memory": memory,
             "k": k,
-            "hidden_min_eig": eigvals.min(),
-            "hidden_max_eig": eigvals.max(),
+            "hidden_eigs": eigvals
         })
 
         # Update the buffer
@@ -386,9 +388,9 @@ class RlCmrac(Cmrac):
         # Reward
         x, xr, _, _, _ = states.values()
         e = x - xr
-        min_eigval = nla.eigvals(wrapped_action["M"]).min()
+        min_eigval = info["eigs"].min()
         e_cost = e.dot(e)
-        reward = 1e2 * min_eigval - 1e-2 * e_cost
+        reward = 1e2 * min_eigval - 0 * e_cost
 
         # Terminal condition
         done = self.is_terminal()
@@ -398,11 +400,11 @@ class RlCmrac(Cmrac):
                        for k, v in memory.items()}
 
         info.update({
-            "action": action,
-            "wrapped_action": wrapped_action,
+            "dist": action,
+            "M": wrapped_action["M"],
+            "N": wrapped_action["N"],
             "memory": info_memory,
             "removed": removed_t,
-            "min_eigval": min_eigval,
             "tracking_error": e_cost,
         })
 
