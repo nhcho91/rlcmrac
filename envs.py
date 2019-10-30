@@ -166,6 +166,17 @@ class Cmrac(Mrac):
             "N": infinite_box(self.N_shape)
         })
 
+    def step(self, action):
+        next_states, reward, done, info = super().step(action)
+
+        eigvals = nla.eigvals(action["M"])
+
+        info.update({
+            "min_eig": eigvals.min(),
+            "max_eig": eigvals.max()
+        })
+        return next_states, reward, done, info
+
     def derivs(self, t, states, action):
         """
         The argument ``action`` here is the composite term of the CMRAC which
@@ -221,16 +232,19 @@ class FeCmrac(Cmrac):
     def step(self, action):
         states = self.states
         memory = self.memory
-        action = {k: memory[k] for k in ['omega_a', 'm_a']}
+        action = {"M": memory["omega_a"], "N": memory["m_a"]}
 
-        next_states, reward, done, info = super(Cmrac, self).step(action)
+        next_states, reward, done, info = super().step(action)
 
         # Info
         k = self.get_k(states)
+        eigvals = nla.eigvals(states["omega_system"])
+
         info.update({
-            "action": action,
             "memory": memory,
-            "k": k
+            "k": k,
+            "hidden_min_eig": eigvals.min(),
+            "hidden_max_eig": eigvals.max(),
         })
 
         # Update the buffer
@@ -269,7 +283,7 @@ class FeCmrac(Cmrac):
 
     def derivs(self, t, states, action):
         x, xr, W, z, phif, omega, m = states.values()
-        omega_a, m_a = action['omega_a'], action['m_a']
+        M, N = action["M"], action["N"]
 
         e = x - xr
         phi = self.unc.basis(x)
@@ -284,7 +298,7 @@ class FeCmrac(Cmrac):
             'main_system': self.systems['main_system'].deriv(t, x, u),
             'reference_system': self.systems['reference_system'].deriv(t, xr),
             'adaptive_system': self.systems['adaptive_system'].deriv(
-                W, x, e) - np.dot(self.gamma2, omega_a.dot(W) - m_a),
+                W, x, e) - np.dot(self.gamma2, M.dot(W) - N),
             'filter_system': self.systems['filter_system'].deriv(z, e, u),
             'filtered_phi': self.systems['filtered_phi'].deriv(phif, x),
             'omega_system': self.systems['omega_system'].deriv(
