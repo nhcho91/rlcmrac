@@ -52,3 +52,7 @@ If you want to plot the result after the running, you can use `--plot` option.
 ```bash
 $ python main.py --all --plot
 ```
+
+## Data
+
+You can [download](https://drive.google.com/open?id=1KXMruwCM9TdxOYU5bwizMyVtlDfnUaIp) the data from my Goole Drive
