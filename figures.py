@@ -2,6 +2,7 @@ import sys
 import os
 import argparse
 import numpy as np
+import numpy.linalg as nla
 import matplotlib.pyplot as plt
 
 import fym.logging as logging
@@ -94,6 +95,7 @@ def figure_1():
     fig, (ax_min, ax_max) = plt.subplots(2, 1, num="Eigenvalues", sharex=True)
 
     plt.subplot(211)
+    plt.ticklabel_format(style="sci", scilimits=(0, 0), useOffset=True)
     for exp in exp_list:
         eig_figures(exp, "min")
     plt.ylabel(r"Minimum $\lambda$")
@@ -104,6 +106,22 @@ def figure_1():
         eig_figures(exp, "max")
     plt.ylabel(r"Maximum $\lambda$")
     plt.xlabel("Time, sec")
+
+    # Estimation error
+    for exp in exp_list:
+        data = get_data(exp)
+        error = nla.norm(
+            data["state"]["adaptive_system"] - data["real_param"],
+            axis=1
+        )
+        plt.figure(num="Estimation error")
+        plt.plot(data["time"], error, **formatting[exp])
+    plt.xlabel("Time, sec")
+    plt.ylabel("Error norm")
+
+    # Real parameter
+    data = get_data(exp_list[0])
+    plt.plot(data["time"], data["real_param"].squeeze())
 
     # Saving
     def savefig(name):
@@ -125,6 +143,10 @@ def figure_1():
     plt.figure(num="Eigenvalues")
     savefig("eigs")
 
+    plt.figure(num="Estimation error")
+    plt.legend()
+    savefig("estim-error")
+
     plt.show()
 
 
@@ -136,7 +158,7 @@ def figure_2():
     from matplotlib.animation import FuncAnimation
     from collections import OrderedDict
 
-    episodic = logging.load("data/rlcmrac/episodic.h5")
+    episodic = logging.load("data/rlcmrac-sac/episodic.h5")
 
     fig, axes = plt.subplots(2, 1)
     time, cmd, state1, ref1, ref2, state2, control = [[] for _ in range(7)]
@@ -153,12 +175,12 @@ def figure_2():
     )
     lines["control"], = axes[1].plot([], [])
 
-    max_action = episodic["action"].max()
+    max_dist = episodic["dist"].max()
 
     def init():
         [ax.set_xlim(0, episodic["time"].max()) for ax in axes]
-        axes[0].set_ylim(-3, 3)
-        axes[1].set_ylim(-300, 300)
+        axes[0].set_ylim(-1, 1)
+        axes[1].set_ylim(-50, 50)
         return lines.values()
 
     def to_segments(xs, ys):
@@ -174,9 +196,9 @@ def figure_2():
         control.append(episodic["control"][frame])
 
         # print(episodic["memory"]["t"][frame])
-        time_action = episodic["memory"]["t"][frame]
-        action = 300 / max_action * episodic["action"][frame]
-        segments = to_segments(time_action, action)
+        dist_time = episodic["memory"]["t"][frame]
+        dist = 50 / max_dist * episodic["dist"][frame]
+        segments = to_segments(dist_time, dist)
 
         episodic["memory"]["t"]
 
@@ -225,8 +247,8 @@ def figure_3():
 
     def init():
         [ax.set_xlim(0, episodic["time"].max()) for ax in axes]
-        axes[0].set_ylim(-3, 3)
-        axes[1].set_ylim(-300, 300)
+        axes[0].set_ylim(-0.5, 0.5)
+        axes[1].set_ylim(-20, 20)
         return lines.values()
 
     def update(frame):
@@ -293,6 +315,6 @@ if __name__ == "__main__":
     group.add_argument("-a", "--all", action="store_true")
     group.add_argument("-n", "--num", type=int)
     parser.add_argument("-s", "--save-dir", default="img")
-    parser.add_argument("-e", "--save-ext", default="eps")
+    parser.add_argument("-e", "--save-ext", default="png")
     args = parser.parse_args()
     main(args)

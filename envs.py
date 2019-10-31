@@ -15,7 +15,7 @@ class Mrac(BaseEnv):
         A = Ar = spec['reference_system']['Ar']
         B = spec['main_system']['B']
         Br = spec['reference_system']['Br']
-        self.unc = ParamUnc(real_param=spec['main_system']['real_param'])
+        self.unc = ParamUnc(initial_param=spec['main_system']['initial_param'])
         self.cmd = SquareCmd(
             length=spec["command"]["length"],
             phase=spec["command"]["phase"],
@@ -79,7 +79,10 @@ class Mrac(BaseEnv):
         info = {
             "time": time,
             "state": states,
+            "control": self.get_control(states),
+            "cmd": self.cmd.get(time),
             "reward": reward,
+            "real_param": self.unc.get_param(time)
         }
 
         # Updates
@@ -96,7 +99,7 @@ class Mrac(BaseEnv):
         x, xr, W = states.values()
 
         e = x - xr
-        u = -W.T.dot(self.unc.basis(x))
+        u = self.get_control(states)
 
         xdot = {
             'main_system': self.systems['main_system'].deriv(t, x, u),
@@ -118,23 +121,14 @@ class Mrac(BaseEnv):
             data = logging.load(self.logger.path)
             self.data_callback(self, data)
 
-    def data_postprocessing(self, data):
-        xs = data['state']['main_system']
-        Ws = data['state']['adaptive_system']
-
-        cmd = np.hstack([self.cmd.get(t) for t in data['time']])
-        u_mrac = np.vstack(
-            [-W.T.dot(self.unc.basis(x)) for W, x in zip(Ws, xs)])
-
-        data.update({
-            "control": u_mrac,
-            "cmd": cmd,
-        })
-        return data
+    def get_control(self, states):
+        x, W = states["main_system"], states["adaptive_system"]
+        u = -W.T.dot(self.unc.basis(x))
+        return u
 
 
 class Cmrac(Mrac):
-    def __init__(self, spec, data_callback):
+    def __init__(self, spec, data_callback=None):
         super().__init__(spec, data_callback)
         self.gamma2 = spec['composite_system']['gamma2']
         self.norm_eps = spec["memory"]["norm_eps"]
@@ -189,7 +183,7 @@ class Cmrac(Mrac):
         M, N = action['M'], action['N']
 
         e = x - xr
-        u = -W.T.dot(self.unc.basis(x))
+        u = self.get_control(states)
 
         xdot = {
             'main_system': self.systems['main_system'].deriv(t, x, u),
@@ -203,7 +197,7 @@ class Cmrac(Mrac):
 
 
 class FeCmrac(Cmrac):
-    def __init__(self, spec, data_callback):
+    def __init__(self, spec, data_callback=None):
         super().__init__(spec, data_callback)
         self.kl = spec["fecmrac"]["kl"]
         self.ku = spec["fecmrac"]["ku"]
@@ -288,8 +282,7 @@ class FeCmrac(Cmrac):
         M, N = action["M"], action["N"]
 
         e = x - xr
-        phi = self.unc.basis(x)
-        u = -W.T.dot(phi)
+        u = self.get_control(states)
 
         phif_norm = nla.norm(phif) + self.norm_eps
         normed_y = self.systems["filter_system"].get_y(z, e) / phif_norm
@@ -312,7 +305,7 @@ class FeCmrac(Cmrac):
 
 
 class RlCmrac(Cmrac):
-    def __init__(self, spec, data_callback):
+    def __init__(self, spec, data_callback=None):
         super().__init__(spec, data_callback)
         self.mem_max_size = spec["memory"]["max_size"]
         self.norm_eps = spec["memory"]["norm_eps"]
@@ -388,9 +381,11 @@ class RlCmrac(Cmrac):
         # Reward
         x, xr, _, _, _ = states.values()
         e = x - xr
-        min_eigval = info["eigs"].min()
+        eig_cost = info["eigs"].min()
         e_cost = e.dot(e)
-        reward = 1e2 * min_eigval - 0 * e_cost
+        u = info['control']
+        u_cost = u.dot(u)
+        reward = 1e5 * eig_cost - 1e2 * e_cost - 1e-1 * u_cost
 
         # Terminal condition
         done = self.is_terminal()
@@ -442,11 +437,14 @@ class RlCmrac(Cmrac):
 
 
 class ParamUnc:
-    def __init__(self, real_param):
-        self.W = assign_2d(real_param)
+    def __init__(self, initial_param):
+        self.W = assign_2d(initial_param)
 
-    def get(self, state):
-        return self.W.T.dot(self.basis(state))
+    def get(self, t, x):
+        return self.get_param(t).T.dot(self.basis(x))
+
+    def get_param(self, t):
+        return self.W + 2 * np.sin(t) + 30 * np.tanh(t / 60)
 
     def basis(self, x):
         return np.hstack((x[:2], np.abs(x[:2]) * x[1], x[0]**3))
@@ -503,7 +501,7 @@ class MainSystem(BaseSystem):
     def deriv(self, t, x, u):
         xdot = (
             self.A.dot(x)
-            + self.B.dot(u + self.unc.get(x))
+            + self.B.dot(u + self.unc.get(t, x))
             + self.Br.dot(self.cmd.get(t))
         )
         return xdot

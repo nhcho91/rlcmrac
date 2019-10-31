@@ -18,17 +18,12 @@ import envs
 import agents
 
 
-def main(args):
+def run(args):
     spec = load_spec("spec.json")
     exp_name = '-'.join([args.env.lower(), args.agent.lower()])
     BASE_LOG_DIR = os.path.join("data", exp_name)
 
-    def parse_data(env, data):
-        data = env.data_postprocessing(data)
-        path = os.path.join(BASE_LOG_DIR, env.logger.basename)
-        logging.save(path, data)
-
-    env = getattr(envs, args.env)(spec, data_callback=parse_data)
+    env = getattr(envs, args.env)(spec)
     agent = getattr(agents, args.agent)(env, spec)
     logger = logging.Logger(log_dir=BASE_LOG_DIR, file_name='episodic.h5')
 
@@ -42,6 +37,8 @@ def main(args):
 
         logger.record(**info)
 
+        agent.update(obs, action, reward, next_obs, done)
+
         obs = next_obs
 
         if done:
@@ -49,14 +46,6 @@ def main(args):
 
     env.close()
     logger.close()
-
-    data = logging.load(logger.path)
-    data = env.data_postprocessing(data)
-    logging.save(logger.path, data)
-
-    if args.plot is True:
-        import plotting
-        plotting.main()
 
 
 if __name__ == "__main__":
@@ -80,4 +69,21 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    main(args)
+    if args.all:
+        tmp_args = parser.parse_args(['-e', 'Mrac'])
+        run(tmp_args)
+        print("MRAC is Finished")
+
+        tmp_args = parser.parse_args(['-e', 'FeCmrac'])
+        run(tmp_args)
+        print("FeCmrac is Finished")
+
+        tmp_args = parser.parse_args(['-e', 'RlCmrac', '--agent', 'SAC'])
+        run(tmp_args)
+        print("RlCmrac is Finished")
+    else:
+        run(args)
+
+    if args.plot:
+        import figures
+        figures.figure_1()

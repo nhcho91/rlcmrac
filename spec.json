@@ -1,7 +1,7 @@
 {
 	"environment": {
 		"time_step": 0.01,
-		"final_time": 60,
+		"final_time": 120,
 		"ode_step_len": 3,
 		"seed": 1,
 		"base_log_dir": "log"
@@ -10,7 +10,7 @@
 		"initial_state": [0.3, 0, 0],
 		"A": [[0, 1, 0], [-15.8, -5.6, -17.3], [1, 0, 0]],
 		"B": [[0], [1], [0]],
-		"real_param": [
+		"initial_param": [
 			[-18.59521], [15.162375], [-62.45153], [9.54708], [21.45291]
 		]
 	},
@@ -25,9 +25,9 @@
 		"Q": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 	},
 	"command": {
-		"length": 8,
-		"phase": 5,
-		"pattern": [2, 0, 0, 0, 0]
+		"length": 15,
+		"phase": 10,
+		"pattern": [0.2, 0.2, 0.5, 0.5, 0.2, 0.2]
 	},
 	"filter_system": {
 		"initial_state": [0],
@@ -40,7 +40,7 @@
 		"gamma2": 10
 	},
 	"fecmrac": {
-		"kl": 0.1,
+		"kl": 1,
 		"ku": 10,
 		"theta": 0.1
 	},

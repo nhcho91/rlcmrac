@@ -237,6 +237,9 @@ class NullAgent:
     def act(self, obs):
         return np.zeros(self.action_shape)
 
+    def update(self, state, action, reward, next_state, done):
+        pass
+
 
 if __name__ == '__main__':
     policy_network = PolicyNetwork(4, 3, 32)
