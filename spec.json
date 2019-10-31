@@ -25,9 +25,9 @@
 		"Q": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 	},
 	"command": {
-		"length": 15,
-		"phase": 10,
-		"pattern": [0.2, 0.2, 0.5, 0.5, 0.2, 0.2]
+		"length": 10,
+		"phase": 0,
+		"pattern": [0.2, 0.5, 0.2, -0.2, -0.5, 0.2]
 	},
 	"filter_system": {
 		"initial_state": [0],

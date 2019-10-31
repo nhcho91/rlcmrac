@@ -444,7 +444,7 @@ class ParamUnc:
         return self.get_param(t).T.dot(self.basis(x))
 
     def get_param(self, t):
-        return self.W + 2 * np.sin(t) + 30 * np.tanh(t / 60)
+        return self.W + 30 * np.tanh(t / 60)
 
     def basis(self, x):
         return np.hstack((x[:2], np.abs(x[:2]) * x[1], x[0]**3))

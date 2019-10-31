@@ -8,40 +8,41 @@ import matplotlib.pyplot as plt
 import fym.logging as logging
 
 
+BASE_DATA_DIR = "data"
+FORMATTING = {
+    "command": dict(label="Command", color="k", linestyle="--"),
+    "reference": dict(label="Reference", color="k", linestyle="-"),
+    "mrac-nullagent": dict(
+        label="MRAC", color="r", alpha=0.5, linestyle="-"),
+    "fecmrac-nullagent": dict(label="FE-CMRAC", color="r", linestyle="-."),
+    "rlcmrac-sac": dict(label="RL-CMRAC", color="b", linestyle="-")
+}
+
+
+def get_data(exp, base=BASE_DATA_DIR):
+    path = os.path.join(base, exp, "episodic.h5")
+    data = logging.load(path)
+    return data
+
+
 def figure_1():
     """
     This figure compares the states, control inputs, the minimum eigenvalues of
     the information matrices of all methods.
     """
-    BASE_DATA_DIR = "data"
-
     exp_list = os.listdir(BASE_DATA_DIR)
     exp_list.remove("tmp")
-
-    def get_data(exp):
-        path = os.path.join(BASE_DATA_DIR, exp, "episodic.h5")
-        data = logging.load(path)
-        return data
-
-    formatting = {
-        "command": dict(label="Command", color="k", linestyle="--"),
-        "reference": dict(label="Reference", color="k", linestyle="-"),
-        "mrac-nullagent": dict(
-            label="MRAC", color="r", alpha=0.5, linestyle="-"),
-        "fecmrac-nullagent": dict(label="FE-CMRAC", color="r", linestyle="-."),
-        "rlcmrac-sac": dict(label="RL-CMRAC", color="b", linestyle="-")
-    }
 
     # Draw common plots
     data = get_data(exp_list[0])
     plt.figure(num="state 1", figsize=[6.4, 4.8])
     plt.plot(
         data["time"], data["cmd"],
-        **formatting["command"]
+        **FORMATTING["command"]
     )
     plt.plot(
         data["time"], data["state"]["reference_system"][:, 0],
-        **formatting["reference"]
+        **FORMATTING["reference"]
     )
     plt.ylabel(r"$x_1$")
     plt.xlabel("Time, sec")
@@ -49,7 +50,7 @@ def figure_1():
     plt.figure(num="state 2", figsize=[6.4, 4.8])
     plt.plot(
         data["time"], data["state"]["reference_system"][:, 1],
-        **formatting["reference"]
+        **FORMATTING["reference"]
     )
     plt.ylabel(r"$x_2$")
     plt.xlabel("Time, sec")
@@ -64,19 +65,19 @@ def figure_1():
         ax = plt.gca()
         ax.plot(
             data["time"], data["state"]["main_system"][:, 0],
-            **formatting[exp],
+            **FORMATTING[exp],
         )
 
         plt.figure(num="state 2")
         plt.plot(
             data["time"], data["state"]["main_system"][:, 1],
-            **formatting[exp],
+            **FORMATTING[exp],
         )
 
         plt.figure(num="control")
         plt.plot(
             data["time"], data["control"],
-            **formatting[exp],
+            **FORMATTING[exp],
         )
 
     for exp in exp_list:
@@ -90,7 +91,7 @@ def figure_1():
             eig = np.min(data["eigs"], axis=1)
         elif minmax == "max":
             eig = np.max(data["eigs"], axis=1)
-        plt.plot(data["time"], eig, **formatting[exp])
+        plt.plot(data["time"], eig, **FORMATTING[exp])
 
     fig, (ax_min, ax_max) = plt.subplots(2, 1, num="Eigenvalues", sharex=True)
 
@@ -115,7 +116,7 @@ def figure_1():
             axis=1
         )
         plt.figure(num="Estimation error")
-        plt.plot(data["time"], error, **formatting[exp])
+        plt.plot(data["time"], error, **FORMATTING[exp])
     plt.xlabel("Time, sec")
     plt.ylabel("Error norm")
 
@@ -158,151 +159,119 @@ def figure_2():
     from matplotlib.animation import FuncAnimation
     from collections import OrderedDict
 
-    episodic = logging.load("data/rlcmrac-sac/episodic.h5")
+    exp_list = os.listdir(BASE_DATA_DIR)
+    exp_list.remove("tmp")
+    exp_list.remove("mrac-nullagent")
 
-    fig, axes = plt.subplots(2, 1)
-    time, cmd, state1, ref1, ref2, state2, control = [[] for _ in range(7)]
-    lines = OrderedDict()
-    lines["cmd"], = axes[0].plot([], [], "k--")
-    lines["state1"], = axes[0].plot([], [], "r")
-    lines["state2"], = axes[0].plot([], [], "b")
-    lines["ref1"], = axes[0].plot([], [], "r--")
-    lines["ref2"], = axes[0].plot([], [], "b--")
-    lines["memory"] = axes[1].stem(
-        [0], [0],
-        use_line_collection=True,
-        linefmt="r",
-    )
-    lines["control"], = axes[1].plot([], [])
+    data = {exp: get_data(exp) for exp in exp_list}
 
-    max_dist = episodic["dist"].max()
+    fig, ax = plt.subplots(figsize=[16, 9])
+    plt.xlabel("Time, sec")
 
-    def init():
-        [ax.set_xlim(0, episodic["time"].max()) for ax in axes]
-        axes[0].set_ylim(-1, 1)
-        axes[1].set_ylim(-50, 50)
-        return lines.values()
+    linekw = dict(linewidth=1, alpha=0.3)
+
+    def make_line(label, *args):
+        ln, = plt.plot([], [], label=label, *args, **linekw)
+        return ln
+
+    time = data["rlcmrac-sac"]["time"]
+    lines = [
+        (
+            make_line("Command", "k--"),
+            data["fecmrac-nullagent"]["cmd"]
+        ),
+        (
+            make_line(r"$x_{r,1}$", "k"),
+            data["fecmrac-nullagent"]["state"]["reference_system"][:, 0]
+        ),
+        (
+            make_line(r"$x_{r,2}$", "k"),
+            data["fecmrac-nullagent"]["state"]["reference_system"][:, 1]
+        ),
+        (
+            make_line(r"FE-CMRAC $x_{1}$", "r-."),
+            data["fecmrac-nullagent"]["state"]["main_system"][:, 0],
+        ),
+        (
+            make_line(r"FE-CMRAC $x_{2}$", "r-."),
+            data["fecmrac-nullagent"]["state"]["main_system"][:, 1],
+        ),
+        (
+            make_line(r"RL-CMRAC $x_{1}$", "b-."),
+            data["rlcmrac-sac"]["state"]["main_system"][:, 0],
+        ),
+        (
+            make_line(r"RL-CMRAC $x_{2}$", "b-."),
+            data["rlcmrac-sac"]["state"]["main_system"][:, 1],
+        ),
+    ]
+
+    dist_lines = {
+        "rlcmrac-sac": plt.vlines(
+            [], [], [],
+            colors=FORMATTING["rlcmrac-sac"]["color"],
+            alpha=1
+        ),
+        "fecmrac-nullagent": plt.vlines(
+            [], [], [],
+            colors=FORMATTING["fecmrac-nullagent"]["color"],
+            alpha=1
+        ),
+    }
+    memory_time_diff = np.diff(data["fecmrac-nullagent"]["memory"]["time"])
+
+    plt.legend()
 
     def to_segments(xs, ys):
         return [[[x, 0], [x, y]] for x, y in zip(xs, ys)]
 
-    def update(frame):
-        time.append(episodic["time"][frame])
-        cmd.append(episodic["cmd"][frame])
-        state1.append(episodic["state"]["main_system"][frame][0])
-        state2.append(episodic["state"]["main_system"][frame][1])
-        ref1.append(episodic["state"]["reference_system"][frame][0])
-        ref2.append(episodic["state"]["reference_system"][frame][1])
-        control.append(episodic["control"][frame])
-
-        # print(episodic["memory"]["t"][frame])
-        dist_time = episodic["memory"]["t"][frame]
-        dist = 50 / max_dist * episodic["dist"][frame]
-        segments = to_segments(dist_time, dist)
-
-        episodic["memory"]["t"]
-
-        lines["cmd"].set_data(time, cmd)
-        lines["state1"].set_data(time, state1)
-        lines["state2"].set_data(time, state2)
-        lines["ref1"].set_data(time, ref1)
-        lines["ref2"].set_data(time, ref2)
-        lines["control"].set_data(time, control)
-
-        lines["memory"].stemlines.set_segments(segments)
-        return lines.values()
-
-    anim = FuncAnimation(
-        fig, update, init_func=init,
-        frames=range(0, len(episodic["time"]), 10), interval=1
-    )
-    plt.show()
-    # anim.save("media/rlcmrac_action_anim.mp4")
-
-
-def figure_3():
-    """
-    This figure creates an animation that shows the history of what action was
-    executed during the simulation.
-    """
-    from matplotlib.animation import FuncAnimation
-    from collections import OrderedDict
-
-    episodic = logging.load("data/fecmrac-nullagent/episodic.h5")
-
-    fig, axes = plt.subplots(2, 1)
-    time, cmd, state1, ref1, ref2, state2, control = [[] for _ in range(7)]
-    lines = OrderedDict()
-    lines["cmd"], = axes[0].plot([], [], "k--")
-    lines["state1"], = axes[0].plot([], [], "r")
-    lines["state2"], = axes[0].plot([], [], "b")
-    lines["ref1"], = axes[0].plot([], [], "r--")
-    lines["ref2"], = axes[0].plot([], [], "b--")
-    lines["memory"] = axes[1].fill_between([], [])
-    lines["control"], = axes[1].plot([], [])
-
-    fill_option = dict(alpha=0.6, facecolor="r")
-
-    control_max = episodic["control"].max()
-
     def init():
-        [ax.set_xlim(0, episodic["time"].max()) for ax in axes]
-        axes[0].set_ylim(-0.5, 0.5)
-        axes[1].set_ylim(-20, 20)
-        return lines.values()
+        ax.set_xlim(0, time.max())
+        ax.set_ylim(-1, 1)
+        return [line for line, _ in lines] + list(dist_lines.values())
 
     def update(frame):
-        time.append(episodic["time"][frame])
-        cmd.append(episodic["cmd"][frame])
-        state1.append(episodic["state"]["main_system"][frame][0])
-        state2.append(episodic["state"]["main_system"][frame][1])
-        ref1.append(episodic["state"]["reference_system"][frame][0])
-        ref2.append(episodic["state"]["reference_system"][frame][1])
-        control.append(episodic["control"][frame])
+        for line, line_data in lines:
+            line.set_data(time[:frame], line_data[:frame])
 
-        ta_idx = np.argmax(
-            episodic["time"] > episodic["memory"]["time"][frame]
-        )
-        dist_time = episodic["time"][:ta_idx]
-        dist_k = episodic["k"][:ta_idx]
-        dist = [
-            control_max * np.exp(-np.trapz(dist_k[i:], dist_time[i:]))
-            for i in range(len(dist_time))
-        ]
+        # Update FE-CMRAC
+        if frame > 0 and memory_time_diff[frame-1] != 0:
+            ta_idx = np.argmax(
+                time > data["fecmrac-nullagent"]["memory"]["time"][frame]
+            )
+            dist_time = time[:ta_idx]
+            dist_k = data["fecmrac-nullagent"]["k"][:ta_idx]
+            dist = [
+                -np.exp(-np.trapz(dist_k[i:], dist_time[i:]))
+                for i in range(len(dist_time))
+            ]
+            segments = to_segments(dist_time, dist)
+            dist_lines["fecmrac-nullagent"].set_segments(segments)
 
-        episodic["memory"]["time"]
-
-        lines["cmd"].set_data(time, cmd)
-        lines["state1"].set_data(time, state1)
-        lines["state2"].set_data(time, state2)
-        lines["ref1"].set_data(time, ref1)
-        lines["ref2"].set_data(time, ref2)
-        lines["control"].set_data(time, control)
-
-        lines["memory"].axes.collections.clear()
-        lines["memory"].axes.fill_between(dist_time, dist, **fill_option)
-        return lines.values()
+        # Update RL-CMRAC
+        dist_time = data["rlcmrac-sac"]["memory"]["t"][frame]
+        dist = 100 * data["rlcmrac-sac"]["dist"][frame]
+        segments = to_segments(dist_time, dist)
+        dist_lines["rlcmrac-sac"].set_segments(segments)
+        return [line for line, _ in lines] + list(dist_lines.values())
 
     anim = FuncAnimation(
         fig, update, init_func=init,
-        frames=range(0, len(episodic["time"]), 10), interval=1
+        frames=range(0, len(time), 10), interval=10
     )
-    plt.show()
-    # anim.save("media/rlcmrac_action_anim.mp4")
+    # plt.show()
+    anim.save(os.path.join(args.save_dir, "dist-movie.mp4"))
 
 
 def main(args):
     if args.all:
         figure_1()
         figure_2()
-        figure_3()
 
     if args.num == 1:
         figure_1()
     elif args.num == 2:
         figure_2()
-    elif args.num == 3:
-        figure_3()
     else:
         raise ValueError(f"The figure {args.num} is not found")
 
@@ -317,4 +286,8 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--save-dir", default="img")
     parser.add_argument("-e", "--save-ext", default="png")
     args = parser.parse_args()
+
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir)
+
     main(args)
