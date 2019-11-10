@@ -159,6 +159,15 @@ def figure_2():
     from matplotlib.animation import FuncAnimation
     from collections import OrderedDict
 
+    plt.rc("font", **{
+        "family": "sans-serif",
+        "sans-serif": ["Helvetica"],
+    })
+    plt.rc("text", usetex=True)
+    plt.rc("lines", linewidth=1)
+    plt.rc("axes", grid=True)
+    plt.rc("grid", linestyle="--", alpha=0.8)
+
     exp_list = os.listdir(BASE_DATA_DIR)
     exp_list.remove("tmp")
     exp_list.remove("mrac-nullagent")
@@ -174,7 +183,8 @@ def figure_2():
         ln, = plt.plot([], [], label=label, *args, **linekw)
         return ln
 
-    time = data["rlcmrac-sac"]["time"]
+    time_list = [data[exp]["time"] for exp in exp_list]
+    time = time_list[np.argmin(list(map(len, time_list)))]
     lines = [
         (
             make_line("Command", "k--"),
@@ -210,24 +220,34 @@ def figure_2():
         "rlcmrac-sac": plt.vlines(
             [], [], [],
             colors=FORMATTING["rlcmrac-sac"]["color"],
-            alpha=1
+            alpha=1,
+            label="RL-CMRAC",
         ),
         "fecmrac-nullagent": plt.vlines(
             [], [], [],
             colors=FORMATTING["fecmrac-nullagent"]["color"],
-            alpha=1
+            alpha=1,
+            label="FE-CMRAC",
         ),
     }
     memory_time_diff = np.diff(data["fecmrac-nullagent"]["memory"]["time"])
 
-    plt.legend()
+    plt.legend(handles=dist_lines.values())
 
     def to_segments(xs, ys):
         return [[[x, 0], [x, y]] for x, y in zip(xs, ys)]
 
     def init():
-        ax.set_xlim(0, time.max())
-        ax.set_ylim(-1, 1)
+        states = np.hstack([
+            data[exp]["state"]["main_system"].ravel() for exp in exp_list
+        ])
+        ylim_max = states.max()
+        ylim_min = states.min()
+        ylim_btw = 1.2 * (ylim_max - ylim_min)
+        ylim_max, ylim_min = ylim_min + ylim_btw, ylim_max - ylim_btw
+
+        ax.set_xlim(0, time[-1])
+        ax.set_ylim(ylim_min, ylim_max)
         return [line for line, _ in lines] + list(dist_lines.values())
 
     def update(frame):
