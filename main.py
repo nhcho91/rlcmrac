@@ -30,6 +30,8 @@ def run(args):
     obs = env.reset()
 
     while True:
+        env.render()
+
         with torch.no_grad():
             action = agent.act(obs)
 
@@ -55,7 +57,7 @@ if __name__ == "__main__":
     group.add_argument('-a', '--all', action='store_true')
     group.add_argument(
         '-e', '--env',
-        choices=('Mrac', 'Cmrac', 'FeCmrac', 'RlCmrac')
+        choices=('Mrac', 'Cmrac', 'FeCmrac', 'RlCmrac', 'ClCmrac')
     )
     parser.add_argument(
         "--agent",
@@ -81,6 +83,10 @@ if __name__ == "__main__":
         tmp_args = parser.parse_args(['-e', 'RlCmrac', '--agent', 'SAC'])
         run(tmp_args)
         print("RlCmrac is Finished")
+
+        tmp_args = parser.parse_args(['-e', 'ClCmrac'])
+        run(tmp_args)
+        print("ClCmrac is Finished")
     else:
         run(args)
 

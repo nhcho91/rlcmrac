@@ -2,6 +2,7 @@ import numpy as np
 import numpy.linalg as nla
 import scipy.linalg as sla
 
+import tqdm
 from gym import spaces
 
 from fym.core import BaseEnv, BaseSystem, infinite_box
@@ -22,6 +23,7 @@ class Mrac(BaseEnv):
             pattern=spec["command"]["pattern"]
         )
         self.data_callback = data_callback
+        self.bar = None
 
         systems = {
             'main_system': MainSystem(
@@ -125,6 +127,15 @@ class Mrac(BaseEnv):
         x, W = states["main_system"], states["adaptive_system"]
         u = -W.T.dot(self.unc.basis(x))
         return u
+
+    def progress_bar(self):
+        if self.bar is None:
+            self.bar = tqdm.tqdm(
+                total=self.clock.max_len,
+                desc="Time"
+            )
+
+        self.bar.update(1)
 
 
 class Cmrac(Mrac):
@@ -415,7 +426,10 @@ class RlCmrac(Cmrac):
             info
         )
 
-    def wrap_action(self, memory, action):
+    def wrap_action(self, memory, action=None):
+        if action is None:
+            action = [1 / self.mem_max_size] * len(memory["t"])
+
         phi_mem, y_mem = memory["phi"], memory["y"]
         M = mul_dist(action, phi_mem, phi_mem)
         N = mul_dist(action, phi_mem, y_mem)
@@ -436,6 +450,60 @@ class RlCmrac(Cmrac):
         return memory, removed_t
 
 
+class ClCmrac(RlCmrac):
+    def step(self, action):
+        states = self.states
+        memory = self.update_memory(
+            self.memory, self.clock.get(), states
+        )
+
+        wrapped_action = self.wrap_action(memory)
+        next_states, reward, done, info = (
+            super(RlCmrac, self).step(wrapped_action)
+        )
+
+        # Info
+        info_memory = {k: fill_nan(v, self.mem_max_size)
+                       for k, v in memory.items()}
+
+        info.update({
+            "M": wrapped_action["M"],
+            "N": wrapped_action["N"],
+            "memory": info_memory,
+        })
+
+        # Update
+        self.memory = memory
+
+        return next_states, reward, done, info
+
+    def update_memory(self, memory, time, states):
+        best_memory = memory
+
+        current_len = len(memory["t"])
+        if self.mem_max_size == current_len:
+            M = self.wrap_action(best_memory)["M"]
+            best_eig = nla.eigvals(M).min()
+
+            for i in range(current_len):
+                reduced_memory = {}
+                for key, val in memory.items():
+                    reduced_memory[key] = np.delete(val, i, axis=0)
+
+                tmp_memory = super().update_memory(reduced_memory, time, states)
+                M = self.wrap_action(tmp_memory)["M"]
+                min_eig = nla.eigvals(M).min()
+
+                if min_eig > best_eig:
+                    best_memory = tmp_memory
+                    best_eig = min_eig
+
+        else:
+            best_memory = super().update_memory(best_memory, time, states)
+
+        return best_memory
+
+
 class ParamUnc:
     def __init__(self, initial_param):
         self.W = assign_2d(initial_param)
@@ -444,7 +512,7 @@ class ParamUnc:
         return self.get_param(t).T.dot(self.basis(x))
 
     def get_param(self, t):
-        return self.W + 30 * np.tanh(t / 60)
+        return self.W + 20 * np.tanh(t / 60) + 30 * np.sin(t / 20)
 
     def basis(self, x):
         return np.hstack((x[:2], np.abs(x[:2]) * x[1], x[0]**3))

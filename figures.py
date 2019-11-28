@@ -15,7 +15,8 @@ FORMATTING = {
     "mrac-nullagent": dict(
         label="MRAC", color="r", alpha=0.5, linestyle="-"),
     "fecmrac-nullagent": dict(label="FE-CMRAC", color="r", linestyle="-."),
-    "rlcmrac-sac": dict(label="RL-CMRAC", color="b", linestyle="-")
+    "rlcmrac-sac": dict(label="RL-CMRAC", color="b", linestyle="-"),
+    "clcmrac-nullagent": dict(label="CL-CMRAC", color="g", linestyle="-."),
 }
 
 
@@ -34,6 +35,7 @@ def figure_1():
     exp_list.remove("tmp")
 
     # Draw common plots
+    print(exp_list)
     data = get_data(exp_list[0])
     plt.figure(num="state 1", figsize=[6.4, 4.8])
     plt.plot(
@@ -283,6 +285,126 @@ def figure_2():
     anim.save(os.path.join(args.save_dir, "dist-movie.mp4"))
 
 
+def figure_3():
+    """
+    This figure creates an animation that shows the history of what action was
+    executed during the simulation.
+    """
+    from matplotlib.animation import FuncAnimation
+    from collections import OrderedDict
+
+    plt.rc("font", **{
+        "family": "sans-serif",
+        "sans-serif": ["Helvetica"],
+    })
+    plt.rc("text", usetex=True)
+    plt.rc("lines", linewidth=1)
+    plt.rc("axes", grid=True)
+    plt.rc("grid", linestyle="--", alpha=0.8)
+
+    exp1 = "rlcmrac-sac"
+    exp2 = "clcmrac-nullagent"
+    exp_list = [exp1, exp2]
+
+    data = {exp: get_data(exp) for exp in exp_list}
+
+    fig, ax = plt.subplots(figsize=[16, 9])
+    plt.xlabel("Time, sec")
+
+    linekw = dict(linewidth=1, alpha=0.3)
+
+    def make_line(label, *args):
+        ln, = plt.plot([], [], label=label, *args, **linekw)
+        return ln
+
+    time_list = [data[exp]["time"] for exp in exp_list]
+    time = time_list[np.argmin(list(map(len, time_list)))]
+
+    sample_data = list(data.values())[0]
+    lines = [
+        (
+            make_line("Command", "k--"),
+            sample_data["cmd"]
+        ),
+        (
+            make_line(r"$x_{r,1}$", "k"),
+            sample_data["state"]["reference_system"][:, 0]
+        ),
+        (
+            make_line(r"$x_{r,2}$", "k"),
+            sample_data["state"]["reference_system"][:, 1]
+        ),
+        (
+            make_line(FORMATTING[exp2]["label"] + r" $x_{1}", "r-."),
+            data[exp2]["state"]["main_system"][:, 0],
+        ),
+        (
+            make_line(FORMATTING[exp2]["label"] + r" $x_{2}", "r-."),
+            data[exp2]["state"]["main_system"][:, 1],
+        ),
+        (
+            make_line(FORMATTING[exp1]["label"] + r" $x_{1}", "b-."),
+            data[exp1]["state"]["main_system"][:, 0],
+        ),
+        (
+            make_line(FORMATTING[exp1]["label"] + r" $x_{2}", "b-."),
+            data[exp1]["state"]["main_system"][:, 1],
+        ),
+    ]
+
+    dist_lines = {
+        k: plt.vlines(
+            [], [], [],
+            colors=FORMATTING[k]["color"],
+            alpha=1,
+            label=FORMATTING[k]["label"],
+        )
+        for k in exp_list
+    }
+
+    plt.legend(handles=dist_lines.values())
+
+    def to_segments(xs, ys):
+        return [[[x, 0], [x, y]] for x, y in zip(xs, ys)]
+
+    def init():
+        states = np.hstack([
+            data[exp]["state"]["main_system"].ravel() for exp in exp_list
+        ])
+        ylim_max = states.max()
+        ylim_min = states.min()
+        ylim_btw = 1.2 * (ylim_max - ylim_min)
+        ylim_max, ylim_min = ylim_min + ylim_btw, ylim_max - ylim_btw
+
+        ax.set_xlim(0, time[-1])
+        ax.set_ylim(ylim_min, ylim_max)
+        return [line for line, _ in lines] + list(dist_lines.values())
+
+    def update(frame):
+        for line, line_data in lines:
+            line.set_data(time[:frame], line_data[:frame])
+
+        # Update
+        for i, exp in enumerate(exp_list):
+            dist_time = data[exp]["memory"]["t"][frame]
+            if i == 0:
+                dist = 100 * data[exp]["dist"][frame]
+            else:
+                dist = [-1] * len(dist_time)
+
+            segments = to_segments(dist_time, dist)
+            dist_lines[exp].set_segments(segments)
+
+        return [line for line, _ in lines] + list(dist_lines.values())
+
+    anim = FuncAnimation(
+        fig, update, init_func=init,
+        frames=range(0, len(time), 10), interval=10
+    )
+    plt.show()
+    # anim.save(os.path.join(args.save_dir, "dist-movie.mp4"))
+
+
 def main(args):
     if args.all:
         figure_1()
@@ -292,6 +414,8 @@ def main(args):
         figure_1()
     elif args.num == 2:
         figure_2()
+    elif args.num == 3:
+        figure_3()
     else:
         raise ValueError(f"The figure {args.num} is not found")
 
