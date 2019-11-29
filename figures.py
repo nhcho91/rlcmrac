@@ -13,7 +13,7 @@ FORMATTING = {
     "command": dict(label="Command", color="k", linestyle="--"),
     "reference": dict(label="Reference", color="k", linestyle="-"),
     "mrac-nullagent": dict(
-        label="MRAC", color="r", alpha=0.5, linestyle="-"),
+        label="MRAC", color="r", alpha=1, linestyle=":"),
     "fecmrac-nullagent": dict(label="FE-CMRAC", color="r", linestyle="-."),
     "rlcmrac-sac": dict(label="RL-CMRAC", color="b", linestyle="-"),
     "clcmrac-nullagent": dict(label="CL-CMRAC", color="g", linestyle="-."),
@@ -85,6 +85,23 @@ def figure_1():
     for exp in exp_list:
         general_figures(exp)
 
+    # Estimation error
+    for exp in exp_list:
+        data = get_data(exp)
+        error = nla.norm(
+            data["state"]["adaptive_system"] - data["real_param"],
+            axis=1
+        )
+        plt.figure(num="Estimation error")
+        plt.plot(data["time"], error, **FORMATTING[exp])
+    plt.xlabel("Time, sec")
+    plt.ylabel("Error norm")
+
+    # Real parameter
+    data = get_data(exp_list[0])
+    plt.plot(data["time"], data["real_param"].squeeze())
+
+
     exp_list.remove("mrac-nullagent")
 
     def eig_figures(exp, minmax):
@@ -109,22 +126,6 @@ def figure_1():
         eig_figures(exp, "max")
     plt.ylabel(r"Maximum $\lambda$")
     plt.xlabel("Time, sec")
-
-    # Estimation error
-    for exp in exp_list:
-        data = get_data(exp)
-        error = nla.norm(
-            data["state"]["adaptive_system"] - data["real_param"],
-            axis=1
-        )
-        plt.figure(num="Estimation error")
-        plt.plot(data["time"], error, **FORMATTING[exp])
-    plt.xlabel("Time, sec")
-    plt.ylabel("Error norm")
-
-    # Real parameter
-    data = get_data(exp_list[0])
-    plt.plot(data["time"], data["real_param"].squeeze())
 
     # Saving
     def savefig(name):
@@ -401,8 +402,8 @@ def figure_3():
         fig, update, init_func=init,
         frames=range(0, len(time), 10), interval=10
     )
-    plt.show()
-    # anim.save(os.path.join(args.save_dir, "dist-movie.mp4"))
+    # plt.show()
+    anim.save(os.path.join(args.save_dir, "dist-movie.mp4"))
 
 
 def main(args):
