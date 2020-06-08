@@ -1,6 +1,5 @@
 import numpy as np
 from collections import deque
-import ujson
 
 
 class Differentiator:
@@ -27,9 +26,3 @@ def assign_2d(mat):
         raise ValueError("The matrix should have 2 dimensions.")
     else:
         return mat
-
-
-def load_spec(file):
-    with open(file, 'r') as f:
-        data = ujson.load(f)
-    return data

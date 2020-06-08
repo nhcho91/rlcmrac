@@ -7,28 +7,75 @@ python main.py
 import numpy as np
 import sys
 import os
+import click
+import shutil
+from tqdm import tqdm
 
 import torch
 
-from utils import load_spec
-
 from fym import logging
 
+import config
 import envs
-import agents
 
 
-def run(args):
-    spec = load_spec("spec.json")
-    exp_name = '-'.join([args.env.lower(), args.agent.lower()])
-    BASE_LOG_DIR = os.path.join("data", exp_name)
+@click.group()
+def main():
+    pass
 
-    env = getattr(envs, args.env)(spec)
-    agent = getattr(agents, args.agent)(env, spec)
-    logger = logging.Logger(log_dir=BASE_LOG_DIR, file_name='episodic.h5')
 
+@main.command()
+@click.option("-p", "--draw-plot", is_flag=True)
+def sim1(draw_plot):
+    gammalist = [5e2, 1e4]
+    kwargs = dict(dt=0.01, max_t=20)
+    basedir = os.path.join(config.DATADIR, "sim1")
+    if os.path.isdir(basedir):
+        shutil.rmtree(basedir)
+    os.makedirs(basedir)
+
+    for gamma in tqdm(gammalist):
+        env = envs.Sim1(gamma=gamma, **kwargs)
+        env.reset()
+        path = os.path.join(basedir, f"MRAC-{int(gamma)}.h5")
+        logger = logging.Logger(path=path)
+        logger.set_info(gamma=gamma)
+
+        while True:
+            done, info = env.step()
+
+            logger.record(**info)
+
+            if done:
+                break
+
+        env.close()
+        logger.close()
+
+    if draw_plot:
+        import plot
+        plot.draw_keynotefig1()
+
+
+@main.command()
+@click.option("-e", "--selected", type=click.Choice(config.ENVLIST),
+              multiple=True)
+def sim2(selected):
+    if not selected:
+        selected = config.ENVLIST
+
+    for selected_envclass in selected:
+        for envclass in envs.__dir__():
+            if selected_envclass.lower() == envclass.lower():
+                break
+
+        env = getattr(envs, envclass)()
+        print(env)
+
+
+def run(env, agent, savepath):
+    env.logger = logging.Logger(savepath)
     obs = env.reset()
-
     while True:
         env.render()
 
@@ -36,8 +83,6 @@ def run(args):
             action = agent.act(obs)
 
         next_obs, reward, done, info = env.step(action)
-
-        logger.record(**info)
 
         agent.update(obs, action, reward, next_obs, done)
 
@@ -47,49 +92,7 @@ def run(args):
             break
 
     env.close()
-    logger.close()
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('-a', '--all', action='store_true')
-    group.add_argument(
-        '-e', '--env',
-        choices=('Mrac', 'Cmrac', 'FeCmrac', 'RlCmrac', 'ClCmrac')
-    )
-    parser.add_argument(
-        "--agent",
-        choices=("NullAgent", "SAC"),
-        default="NullAgent"
-    )
-    parser.add_argument(
-        '-p', '--plot',
-        action='store_true',
-        help='If the argument is empty, it will plot the most recent data in'
-    )
-    args = parser.parse_args()
-
-    if args.all:
-        tmp_args = parser.parse_args(['-e', 'Mrac'])
-        run(tmp_args)
-        print("MRAC is Finished")
-
-        tmp_args = parser.parse_args(['-e', 'FeCmrac'])
-        run(tmp_args)
-        print("FeCmrac is Finished")
-
-        tmp_args = parser.parse_args(['-e', 'RlCmrac', '--agent', 'SAC'])
-        run(tmp_args)
-        print("RlCmrac is Finished")
-
-        tmp_args = parser.parse_args(['-e', 'ClCmrac'])
-        run(tmp_args)
-        print("ClCmrac is Finished")
-    else:
-        run(args)
-
-    if args.plot:
-        import figures
-        figures.figure_1()
+    main()

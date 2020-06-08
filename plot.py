@@ -4,8 +4,12 @@ import argparse
 import numpy as np
 import numpy.linalg as nla
 import matplotlib.pyplot as plt
+import click
+import shutil
 
 import fym.logging as logging
+
+import config
 
 
 BASE_DATA_DIR = "data"
@@ -18,6 +22,20 @@ FORMATTING = {
     "rlcmrac-sac": dict(label="RL-CMRAC", color="b", linestyle="-"),
     "clcmrac-nullagent": dict(label="CL-CMRAC", color="g", linestyle="-."),
 }
+
+plt.rc("font", **{
+    "family": "sans-serif",
+    "sans-serif": ["Helvetica"],
+})
+plt.rc("text", usetex=True)
+plt.rc("lines", linewidth=1)
+plt.rc("axes", grid=True)
+plt.rc("grid", linestyle="--", alpha=0.8)
+
+
+@click.group()
+def main():
+    pass
 
 
 def get_data(exp, base=BASE_DATA_DIR):
@@ -100,7 +118,6 @@ def figure_1():
     # Real parameter
     data = get_data(exp_list[0])
     plt.plot(data["time"], data["real_param"].squeeze())
-
 
     exp_list.remove("mrac-nullagent")
 
@@ -406,33 +423,56 @@ def figure_3():
     anim.save(os.path.join(args.save_dir, "dist-movie.mp4"))
 
 
-def main(args):
-    if args.all:
-        figure_1()
-        figure_2()
+@main.command()
+def keynotefig1():
+    draw_keynotefig1()
 
-    if args.num == 1:
-        figure_1()
-    elif args.num == 2:
-        figure_2()
-    elif args.num == 3:
-        figure_3()
-    else:
-        raise ValueError(f"The figure {args.num} is not found")
 
-    plt.show()
+def draw_keynotefig1():
+    plt.rc("lines", linewidth=1.5)
+    cycler = plt.cycler(color=["k", "b", "r"])
+
+    basepath = os.path.join(config.DATADIR, "sim1")
+    figdir = os.path.join(config.FIGDIR, "keynote")
+    if os.path.isdir(figdir):
+        shutil.rmtree(figdir)
+    os.makedirs(figdir)
+
+    files = [
+        os.path.join(path, filename)
+        for path, dirs, files in os.walk(basepath)
+        for filename in files
+        if filename.endswith(".h5")
+    ]
+    for i, file in enumerate(files):
+        data, info = logging.load(file, with_info=True)
+        gamma = info["gamma"]
+        savepath = os.path.join(figdir, f"fig1-{i}.pdf")
+
+        plt.figure()
+
+        ax = plt.subplot(211)
+        for x, xr, kwargs in zip(
+                data["state"]["main"].squeeze().T,
+                data["state"]["mrac"]["xr"].squeeze().T,
+                cycler):
+            lnx, = plt.plot(data["time"], x, c="k")
+            lnxr, = plt.plot(data["time"], xr, c="r", ls="--")
+        plt.title(f"Learning rate: {int(gamma):,}")
+        plt.ylabel("State")
+        plt.ylim(-1.5, 1.5)
+
+        plt.subplot(212, sharex=ax)
+        plt.plot(data["time"], data["control"].squeeze(), c="k")
+        plt.ylabel("Control Input")
+        plt.ylim(-35, 35)
+        plt.xlabel("Time, sec")
+        plt.xlim(0, data["time"].max())
+        plt.legend([lnx, lnxr], ["Plant", "Reference Model"])
+
+        plt.savefig(savepath)
+    # plt.show()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("-a", "--all", action="store_true")
-    group.add_argument("-n", "--num", type=int)
-    parser.add_argument("-s", "--save-dir", default="img")
-    parser.add_argument("-e", "--save-ext", default="png")
-    args = parser.parse_args()
-
-    if not os.path.exists(args.save_dir):
-        os.makedirs(args.save_dir)
-
-    main(args)
+    main()

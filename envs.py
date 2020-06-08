@@ -8,134 +8,140 @@ from gym import spaces
 from fym.core import BaseEnv, BaseSystem, infinite_box
 import fym.logging as logging
 
+import config
 from utils import assign_2d
 
 
+def basis(x):
+    return np.vstack((x[:2], np.abs(x[:2]) * x[1], x[0]**3))
+
+
+class ParamUnc:
+    def __init__(self, initial_param, time_varying=False):
+        self.W = assign_2d(initial_param)
+        self.time_varying = time_varying
+
+    def get(self, t, x):
+        return self.get_param(t).T.dot(basis(x))
+
+    def get_param(self, t):
+        if self.time_varying:
+            return self.W + 20 * np.tanh(t / 60) + 30 * np.sin(t / 20)
+        else:
+            return self.W
+
+
+class SquareCmd:
+    def __init__(self, length, phase=0, pattern=[1, -1]):
+        """
+        Parameters
+        ----------
+        period: float (>0) [sec]
+        amplitude: float (>0)
+        width: float or int in (0, 100) [%]
+        phase: float [sec]
+        """
+        self.length = length
+        self.phase = phase
+        self.pattern = pattern
+        self.period = self.length * len(self.pattern)
+
+    def get(self, t):
+        """
+        scipy.signal.square:
+            The square wave has a period ``2*pi``, has value +1 from 0 to
+            ``2*pi*duty`` and -1 from ``2*pi*duty`` to ``2*pi``.
+            `duty` must be in the interval [0,1].
+        """
+        t = t - self.phase
+        if t > 0:
+            s = self.pattern[
+                int((t % self.period) / self.period * len(self.pattern))
+            ]
+        else:
+            s = 0
+        return np.atleast_2d(s)
+
+
+class MainSystem(BaseSystem):
+    A = config.A
+    B = config.B
+    Br = config.BR
+
+    def set_dot(self, u, unc, cmd):
+        self.dot = self.A.dot(self.state) + self.B.dot(u + unc) + self.Br.dot(cmd)
+
+
+class RefSystem(BaseSystem):
+    Ar = config.AR
+    Br = config.BR
+
+    def set_dot(self, c):
+        self.dot = self.Ar.dot(self.state) + self.Br.dot(c)
+
+
 class Mrac(BaseEnv):
-    def __init__(self, spec, data_callback=None):
-        A = Ar = spec['reference_system']['Ar']
-        B = spec['main_system']['B']
-        Br = spec['reference_system']['Br']
-        self.unc = ParamUnc(initial_param=spec['main_system']['initial_param'])
+    def __init__(self, gamma):
+        super().__init__()
+        self.xr = RefSystem(config.INITIAL_STATE)
+        self.W = BaseSystem(np.zeros_like(config.INITIAL_PARAM))
+        self.Gamma = np.asarray(gamma)
+
+    def set_dot(self, x, c):
+        e = x - self.xr.state
+        self.xr.set_dot(c)
+        self.W.dot = self.Gamma.dot(basis(x)).dot(e.T).dot(config.P).dot(config.B)
+
+    def get(self, x, W):
+        return -W.T.dot(basis(x))
+
+
+class Sim1(BaseEnv):
+    def __init__(self, gamma=config.GAMMA, **kwargs):
+        super().__init__(**kwargs)
+        self.main = MainSystem(config.INITIAL_STATE)
+        self.mrac = Mrac(gamma)
+
+        self.unc = ParamUnc(initial_param=config.INITIAL_PARAM)
         self.cmd = SquareCmd(
-            length=spec["command"]["length"],
-            phase=spec["command"]["phase"],
-            pattern=spec["command"]["pattern"]
-        )
-        self.data_callback = data_callback
-        self.bar = None
-
-        systems = {
-            'main_system': MainSystem(
-                initial_state=spec['main_system']['initial_state'],
-                A=A,
-                B=B,
-                Br=Br,
-                unc=self.unc,
-                cmd=self.cmd,
-            ),
-            'reference_system': RefSystem(
-                initial_state=spec['reference_system']['initial_state'],
-                Ar=Ar,
-                Br=Br,
-                cmd=self.cmd
-            ),
-            'adaptive_system': AdaptiveSystem(
-                initial_state=spec['adaptive_system']['initial_state'],
-                A=A,
-                B=B,
-                gamma1=spec['adaptive_system']['gamma1'],
-                Q=spec['adaptive_system']['Q'],
-                unc=self.unc
-            )
-        }
-
-        self.observation_space = infinite_box((
-            len(spec['main_system']['initial_state'])
-            + len(spec['reference_system']['initial_state']),
-            + len(np.ravel(spec['adaptive_system']['initial_state'])),
-            + np.shape(Br)[1],
-        ))
-        self.action_space = infinite_box([])
-
-        super().__init__(
-            systems=systems,
-            dt=spec['environment']['time_step'],
-            max_t=spec['environment']['final_time'],
-            ode_step_len=spec['environment']['ode_step_len'],
+            length=config.COMMAND_LENGTH,
+            phase=config.COMMAND_PHASE,
+            pattern=config.COMMAND_PATTERN
         )
 
-    def step(self, action):
-        states = self.states
+    def set_dot(self, t):
+        """
+        The argument ``action`` here is the composite term of the CMRAC which
+        has a matrix form.
+        """
+        x, (_, W) = self.observe_list()
+
+        u = self.mrac.get(x, W)
+
+        unc = self.unc.get(t, x)
+        cmd = self.cmd.get(t)
+
+        self.main.set_dot(u, unc, cmd)
+        self.mrac.set_dot(x, cmd)
+
+    def step(self):
+        states = self.observe_dict()
+        control = self.mrac.get(states["main"], states["mrac"]["W"])
         time = self.clock.get()
-
-        next_states, full_hist = self.get_next_states(time, states, action)
-
-        # Reward
-        reward = 0
-
-        # Terminal condition
-        done = self.is_terminal()
+        cmd = self.cmd.get(time)
+        param = self.unc.get_param(time)
+        *_, done = self.update()
 
         # Info
         info = {
             "time": time,
             "state": states,
-            "control": self.get_control(states),
-            "cmd": self.cmd.get(time),
-            "reward": reward,
-            "real_param": self.unc.get_param(time)
+            "control": control,
+            "cmd": cmd,
+            "real_param": param,
         }
 
-        # Updates
-        self.states = next_states
-        self.clock.tick()
-
-        return states, reward, done, info
-
-    def derivs(self, t, states, action):
-        """
-        The argument ``action`` here is the composite term of the CMRAC which
-        has a matrix form.
-        """
-        x, xr, W = states.values()
-
-        e = x - xr
-        u = self.get_control(states)
-
-        xdot = {
-            'main_system': self.systems['main_system'].deriv(t, x, u),
-            'reference_system': self.systems['reference_system'].deriv(t, xr),
-            'adaptive_system': self.systems['adaptive_system'].deriv(
-                W, x, e),
-        }
-        return self.unpack_state(xdot)
-
-    def is_terminal(self):
-        if self.clock.get() > self.clock.max_t:
-            return True
-        else:
-            return False
-
-    def close(self):
-        super().close()
-        if self.data_callback is not None:
-            data = logging.load(self.logger.path)
-            self.data_callback(self, data)
-
-    def get_control(self, states):
-        x, W = states["main_system"], states["adaptive_system"]
-        u = -W.T.dot(self.unc.basis(x))
-        return u
-
-    def progress_bar(self):
-        if self.bar is None:
-            self.bar = tqdm.tqdm(
-                total=self.clock.max_len,
-                desc="Time"
-            )
-
-        self.bar.update(1)
+        return done, info
 
 
 class Cmrac(Mrac):
@@ -504,52 +510,6 @@ class ClCmrac(RlCmrac):
         return best_memory
 
 
-class ParamUnc:
-    def __init__(self, initial_param):
-        self.W = assign_2d(initial_param)
-
-    def get(self, t, x):
-        return self.get_param(t).T.dot(self.basis(x))
-
-    def get_param(self, t):
-        return self.W + 20 * np.tanh(t / 60) + 30 * np.sin(t / 20)
-
-    def basis(self, x):
-        return np.hstack((x[:2], np.abs(x[:2]) * x[1], x[0]**3))
-
-
-class SquareCmd:
-    def __init__(self, length, phase=0, pattern=[1, -1]):
-        """
-        Parameters
-        ----------
-        period: float (>0) [sec]
-        amplitude: float (>0)
-        width: float or int in (0, 100) [%]
-        phase: float [sec]
-        """
-        self.length = length
-        self.phase = phase
-        self.pattern = pattern
-        self.period = self.length * len(self.pattern)
-
-    def get(self, t):
-        """
-        scipy.signal.square:
-            The square wave has a period ``2*pi``, has value +1 from 0 to
-            ``2*pi*duty`` and -1 from ``2*pi*duty`` to ``2*pi``.
-            `duty` must be in the interval [0,1].
-        """
-        t = t - self.phase
-        if t > 0:
-            s = self.pattern[
-                int((t % self.period) / self.period * len(self.pattern))
-            ]
-        else:
-            s = 0
-        return np.atleast_1d(s)
-
-
 class MemorySystem(BaseSystem):
     def __init__(self, initial_state):
         super().__init__(initial_state=initial_state)
@@ -557,60 +517,6 @@ class MemorySystem(BaseSystem):
     def deriv(self, x, k, u1, u2):
         xdot = - k * x + np.outer(u1, u2)
         return xdot
-
-
-class MainSystem(BaseSystem):
-    def __init__(self, initial_state, A, B, Br, unc, cmd):
-        super().__init__(initial_state=initial_state)
-        self.A, self.B, self.Br = map(assign_2d, [A, B, Br])
-        self.unc = unc
-        self.cmd = cmd
-
-    def deriv(self, t, x, u):
-        xdot = (
-            self.A.dot(x)
-            + self.B.dot(u + self.unc.get(t, x))
-            + self.Br.dot(self.cmd.get(t))
-        )
-        return xdot
-
-
-class RefSystem(BaseSystem):
-    def __init__(self, initial_state, Ar, Br, cmd):
-        super().__init__(initial_state)
-
-        self.Ar = assign_2d(Ar)
-        self.Br = assign_2d(Br)
-        self.cmd = cmd
-
-    def deriv(self, t, x):
-        xdot = self.Ar.dot(x) + self.Br.dot(self.cmd.get(t))
-        return xdot
-
-
-class AdaptiveSystem(BaseSystem):
-    def __init__(self, initial_state, A, B, gamma1, Q, unc):
-        super().__init__(initial_state=initial_state)
-
-        self.A = assign_2d(A)
-        self.B = assign_2d(B)
-        self.gamma1 = gamma1
-        self.Q = assign_2d(Q)
-        self.P = self.calc_P(self.A, self.B, self.Q)
-        self.basis = unc.basis
-
-    def calc_P(self, A, B, Q):
-        P = sla.solve_lyapunov(self.A.T, -self.Q)
-        return P
-
-    def deriv(self, W, x, e):
-        # M, N = composite_input['M'], composite_input['N']
-        Wdot = (
-            np.dot(
-                self.gamma1, np.outer(self.basis(x), e)
-            ).dot(self.P).dot(self.B)
-        )
-        return Wdot
 
 
 class FilterSystem(BaseSystem):
